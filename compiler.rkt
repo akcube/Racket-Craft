@@ -47,12 +47,12 @@
                        )
                    )
                    (car es) (cdr es))]
-    [(Prim op es) #:when (equal? 1 (length es))
+    [(Prim op es) #:when (>= 1 (length es))
                   (match es
+                    ['() (Prim op es)]
                     [(list (? is-atom? a)) (Prim op es)]
                     [(list a) (let ([t (gensym 't)]) (Let t (remove-complex-opera* a) (Prim op (list (Var t)))))]
                     )]
-    [(Prim op es) (Prim op es)]
   )
 )
 
