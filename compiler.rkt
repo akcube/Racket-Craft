@@ -56,9 +56,31 @@
   )
 )
 
+(define (explicate-control-tail e)
+  (match e
+    [(Var x) (Return (Var x))]
+    [(Int n) (Return (Int n))]
+    [(Let x rhs body) (explicate-assign rhs x (explicate-control-tail body))]
+    [(Prim op es) (Return (Prim op es))]
+    [else (error "explicate_tail unhandled case" e)]
+  )
+)
+
+(define (explicate-assign e x cont)
+  (match e
+    [(Var y) (Seq (Assign (Var x) (Var y)) cont)]
+    [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
+    [(Let y rhs body) (explicate-assign rhs y (explicate-assign body x cont))]
+    [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
+    [else (error "explicate_assign unhandled case" e)]
+  )
+)
+
 ;; explicate-control : R1 -> C0
 (define (explicate-control p)
-  (error "TODO: code goes here (explicate-control)"))
+  (match p
+    [(Program info body) (CProgram info (list (cons 'start (explicate-control-tail body))))]
+  ))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -66,7 +88,7 @@
 (define compiler-passes
   `( 
      ;; Uncomment the following passes as you finish them.
-     ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
+    ;  ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
      ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
-     ;; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
+     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
      ))
