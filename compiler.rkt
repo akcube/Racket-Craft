@@ -13,15 +13,14 @@
 (define (uniquify_exp env)
   (lambda (e) 
   (match e
-    [(Var x) (Var (dict-ref env x))] ;;TODO:
+    [(Var x) (Var (dict-ref env x))]
     [(Int n) (Int n)]
-    [(Let x e body) (let ([n (gensym x)]) (Let n ((uniquify_exp env) e) ((uniquify_exp (dict-set env x n)) body)) )] ;;TODO:
+    [(Let x e body) (let ([n (gensym x)]) (Let n ((uniquify_exp env) e) ((uniquify_exp (dict-set env x n)) body)) )]
     [(Prim op es) (Prim op (for/list ([e es]) ((uniquify_exp env) e)))]
   ))
 )
 ;; uniquify : R1 -> R1
 (define (uniquify p)
-  ; (error "TODO: code goes here (uniquify)"))
   (match p 
     [(Program '() e) (Program '() ((uniquify_exp '()) e))])
 )
