@@ -43,7 +43,7 @@
                        [((? is-atom? rx) ry) (let ([t (gensym 't)]) (Let t (remove-complex-opera* ry) (Prim op (list (Var t) rx))))]
                        [(rx (? is-atom? ry)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* rx) (Prim op (list ry (Var t)))))]
                        [(rx ry) (let ([t1 (gensym 't)] [t2 (gensym 't)])
-                                  (Let t1 (remove-complex-opera* rx) (Let t2 (remove-complex-opera* ry) (Prim op (list Var(t2) Var(t1))))))]
+                                  (Let t1 (remove-complex-opera* ry) (Let t2 (remove-complex-opera* rx) (Prim op (list (Var t2) (Var t1))))))]
                        )
                    )
                    (car es) (cdr es))]
