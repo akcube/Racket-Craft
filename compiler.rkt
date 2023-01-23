@@ -27,8 +27,34 @@
 )
 
 ;; remove-complex-opera* : R1 -> R1
+(define (is-atom? x)
+  ((or Int? Var?)x))
+
 (define (remove-complex-opera* p)
-  (error "TODO: code goes here (remove-complex-opera*)"))
+  (match p
+    [(Program '() e) (Program '() (remove-complex-opera* e))]
+    [(Int n) (Int n)]
+    [(Var x) (Var x)]
+    [(Let x e body) (Let x (remove-complex-opera* e) (remove-complex-opera* body))]
+    [(Prim op es) #:when (< 1 (length es)) (foldl
+                   (lambda (x y)
+                     (match* (x y)
+                       [((? is-atom? rx) (? is-atom? ry)) (Prim op (list ry rx))]
+                       [((? is-atom? rx) ry) (let ([t (gensym 't)]) (Let t (remove-complex-opera* ry) (Prim op (list (Var t) rx))))]
+                       [(rx (? is-atom? ry)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* rx) (Prim op (list ry (Var t)))))]
+                       [(rx ry) (let ([t1 (gensym 't)] [t2 (gensym 't)])
+                                  (Let t1 (remove-complex-opera* rx) (Let t2 (remove-complex-opera* ry) (Prim op (list Var(t2) Var(t1))))))]
+                       )
+                   )
+                   (car es) (cdr es))]
+    [(Prim op es) #:when (equal? 1 (length es))
+                  (match es
+                    [(list (? is-atom? a)) (Prim op es)]
+                    [(list a) (let ([t (gensym 't)]) (Let t (remove-complex-opera* a) (Prim op (list (Var t)))))]
+                    )]
+    [(Prim op es) (Prim op es)]
+  )
+)
 
 ;; explicate-control : R1 -> C0
 (define (explicate-control p)
@@ -41,6 +67,6 @@
   `( 
      ;; Uncomment the following passes as you finish them.
      ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
-     ;; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
+     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
      ;; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
      ))
