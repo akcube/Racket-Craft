@@ -28,7 +28,7 @@
 
 ;; remove-complex-opera* : R1 -> R1
 (define (is-atom? x)
-  ((or Int? Var?)x))
+  (or (Int? x)  (Var? x)))
 
 (define (remove-complex-opera* p)
   (match p
