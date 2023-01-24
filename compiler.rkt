@@ -26,12 +26,60 @@
 )
 
 ;; remove-complex-opera* : R1 -> R1
+(define (is-atom? x)
+  (or (Int? x)  (Var? x)))
+
 (define (remove-complex-opera* p)
-  (error "TODO: code goes here (remove-complex-opera*)"))
+  (match p
+    [(Program '() e) (Program '() (remove-complex-opera* e))]
+    [(Int n) (Int n)]
+    [(Var x) (Var x)]
+    [(Let x e body) (Let x (remove-complex-opera* e) (remove-complex-opera* body))]
+    [(Prim op es) #:when (< 1 (length es)) (foldl
+                   (lambda (x y)
+                     (match* (x y)
+                       [((? is-atom? rx) (? is-atom? ry)) (Prim op (list ry rx))]
+                       [((? is-atom? rx) ry) (let ([t (gensym 't)]) (Let t (remove-complex-opera* ry) (Prim op (list (Var t) rx))))]
+                       [(rx (? is-atom? ry)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* rx) (Prim op (list ry (Var t)))))]
+                       [(rx ry) (let ([t1 (gensym 't)] [t2 (gensym 't)])
+                                  (Let t1 (remove-complex-opera* ry) (Let t2 (remove-complex-opera* rx) (Prim op (list (Var t1) (Var t2))))))]
+                       )
+                   )
+                   (car es) (cdr es))]
+    [(Prim op es) #:when (>= 1 (length es))
+                  (match es
+                    ['() (Prim op es)]
+                    [(list (? is-atom? a)) (Prim op es)]
+                    [(list a) (let ([t (gensym 't)]) (Let t (remove-complex-opera* a) (Prim op (list (Var t)))))]
+                    )]
+  )
+)
+
+(define (explicate-control-tail e)
+  (match e
+    [(Var x) (Return (Var x))]
+    [(Int n) (Return (Int n))]
+    [(Let x rhs body) (explicate-assign rhs x (explicate-control-tail body))]
+    [(Prim op es) (Return (Prim op es))]
+    [else (error "explicate_tail unhandled case" e)]
+  )
+)
+
+(define (explicate-assign e x cont)
+  (match e
+    [(Var y) (Seq (Assign (Var x) (Var y)) cont)]
+    [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
+    [(Let y rhs body) (explicate-assign rhs y (explicate-assign body x cont))]
+    [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
+    [else (error "explicate_assign unhandled case" e)]
+  )
+)
 
 ;; explicate-control : R1 -> C0
 (define (explicate-control p)
-  (error "TODO: code goes here (explicate-control)"))
+  (match p
+    [(Program info body) (CProgram info (list (cons 'start (explicate-control-tail body))))]
+  ))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
@@ -40,6 +88,6 @@
   `( 
      ;; Uncomment the following passes as you finish them.
      ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
-     ;; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
-     ;; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
+     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
+     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
      ))
