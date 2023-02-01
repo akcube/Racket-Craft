@@ -211,22 +211,33 @@
     )
   )
 
+(define (round-16 n)
+  (if (equal? 0 (modulo n 16)) n (* 16 (+ (quotient n 16) 1)))
+)
+
 (define (gen-prelude info)
   (list
    (Instr 'pushq (list (Reg 'rbp)))
    (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp)))
-   (Instr 'subq  (list (Imm (dict-ref info 'stack-space)) (Reg 'rsp)))
+   (Instr 'subq  (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
    (Jmp 'start)
    )
   )
 
 (define (gen-conclusion info)
   (list
-   (Instr 'addq (list (Imm (dict-ref info 'stack-space)) (Reg 'rsp)))
+   (Instr 'addq (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
    (Instr 'popq (list (Reg 'rbp)))
    (Retq)
    )
   )
+
+(define (main-block)
+  (match (system-type 'os)
+    ['macos '_main]
+    [_ 'main]
+  )
+)
 
 ;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
@@ -234,7 +245,7 @@
     [(X86Program info (list (cons label (Block '() instrs))))
      (X86Program info (list
                        (cons label (Block '() instrs))
-                       (cons 'main (Block '() (gen-prelude info)))
+                       (cons (main-block) (Block '() (gen-prelude info)))
                        (cons 'conclusion (Block '() (gen-conclusion info)))
                        ))]
     ))
