@@ -115,7 +115,7 @@
 
 (define (select-instructions-tail tail seq)
   (match tail
-    [(Return exp) (append seq (select-instructions-stmt (Assign (Reg 'rax) exp)))]
+    [(Return exp) (append seq (select-instructions-stmt (Assign (Reg 'rax) exp)) (list (Jmp 'conclusion)))]
     [(Seq stmt tail) (select-instructions-tail tail (append seq (select-instructions-stmt stmt)))]
     )
   )
@@ -123,7 +123,120 @@
 ;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions p)
   (match p
-    [(CProgram info (list (cons 'start exp))) (X86Program info (list (cons 'start (Block '() (select-instructions-tail exp '())))))]
+    [(CProgram info (list (cons label exp))) (X86Program info (list (cons label (Block '() (select-instructions-tail exp '())))))]
+    ))
+
+(define (gen-locs locals-types env cnt)
+  (match locals-types
+    ['() (values env cnt)]
+    [(list (cons var 'Integer) rest ...) (gen-locs rest (dict-set env var (+ cnt 8)) (+ cnt 8))]
+    )
+  )
+
+(define (assign-homes-var env)
+  (lambda (var)
+    (match var
+      [(Imm _) var]
+      [(Reg _) var]
+      [(Var v) (Deref 'rbp (- (dict-ref env v)))]
+      )
+    )
+  )
+
+(define (assign-homes-instr env)
+  (lambda (instr)
+    (match instr
+      [(Instr name arg*) (Instr name (for/list ([e arg*]) ((assign-homes-var env) e)))]
+      [_ instr]
+      ))
+  )
+
+;; assign-homes : pseudo-x86 -> pseudo-x86
+(define (assign-homes p)
+  ; (error "TODO: code goes here (assign-homes)"))
+  (match p
+    [(X86Program info (list (cons label (Block '() instrs))))
+     (let-values
+         ([(env cnt) (gen-locs (dict-ref info 'locals-types) '() 0)])
+       (X86Program (dict-set info 'stack-space cnt)
+                   (list (cons label
+                               (Block '()
+                                      (for/list ([ins instrs]) ((assign-homes-instr env) ins))
+                                      )))))]
+    ))
+
+(define (big-int? n)
+  (< 65536 n)
+  )
+
+(define (patch-instrs instrs)
+  (match instrs
+    ['() '()]
+    [(list ins rest ...)
+     (match ins
+       [(Instr name (list (Deref reg1 off1) (Deref reg2 off2)))
+        (append (list
+                 (Instr 'movq (list (Deref reg1 off1) (Reg 'rax)))
+                 (Instr name (list (Reg 'rax) (Deref reg2 off2)))
+                 )
+                (patch-instrs rest))]
+       [(Instr name (list (Imm (? big-int? n)) (Deref reg off)))
+        (append (list
+                 (Instr 'movq (list (Imm n) (Reg 'rax)))
+                 (Instr name (list (Reg 'rax) (Deref reg off)))
+                 )
+                (patch-instrs rest)
+                )]
+       ;; This is prolly not required but just in case
+       [(Instr name (list (Deref reg off) (Imm (? big-int? n))))
+        (append (list
+                 (Instr 'movq (list (Deref reg off) (Reg 'rax) ))
+                 (Instr name (list (Reg 'rax) (Imm n)))
+                 )
+                (patch-instrs rest)
+                )]
+       [_ (cons ins (patch-instrs rest))]
+       )
+     ]
+    )
+  )
+
+;; patch-instructions : psuedo-x86 -> x86
+(define (patch-instructions p)
+  ; (error "TODO: code goes here (patch-instructions)"))
+  (match p
+    [(X86Program info (list (cons label (Block '() instrs))))
+     (X86Program info (list (cons label (Block '() (patch-instrs instrs)))))
+     ]
+    )
+  )
+
+(define (gen-prelude info)
+  (list
+   (Instr 'pushq (list (Reg 'rbp)))
+   (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp)))
+   (Instr 'subq  (list (Imm (dict-ref info 'stack-space)) (Reg 'rsp)))
+   (Jmp 'start)
+   )
+  )
+
+(define (gen-conclusion info)
+  (list
+   (Instr 'addq (list (Imm (dict-ref info 'stack-space)) (Reg 'rsp)))
+   (Instr 'popq (list (Reg 'rbp)))
+   (Retq)
+   )
+  )
+
+;; prelude-and-conclusion : x86 -> x86
+(define (prelude-and-conclusion p)
+  (match p
+    [(X86Program info (list (cons label (Block '() instrs))))
+     (X86Program info (list
+                       (cons label (Block '() instrs))
+                       (cons 'main (Block '() (gen-prelude info)))
+                       (cons 'conclusion (Block '() (gen-conclusion info)))
+                       ))]
     ))
 
 ;; Define the compiler passes to be used by interp-tests and the grader
@@ -136,4 +249,7 @@
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
     ("instruction selection" ,select-instructions , interp-x86-0)
+    ("assign homes" ,assign-homes ,interp-x86-0)
+    ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
     ))
