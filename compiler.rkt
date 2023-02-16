@@ -94,7 +94,7 @@
   (match stmt
     [(Assign v exp) (match exp
                       [(? is-atom? exp) (list (Instr 'movq (list (select-instructions-atm exp) v)))]
-                      [(Prim 'read '()) (list (Callq 'read_int 1) (Instr 'movq (list (Reg 'rax) v)))]
+                      [(Prim 'read '()) (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) v)))]
                       [(Prim '+ (list v1 v2)) (list
                                                (Instr 'movq (list (select-instructions-atm v1) (Reg 'rax)))
                                                (Instr 'addq (list (select-instructions-atm v2) (Reg 'rax)))
@@ -153,7 +153,6 @@
 
 ;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (assign-homes p)
-  ; (error "TODO: code goes here (assign-homes)"))
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
      (let-values
@@ -163,7 +162,57 @@
                                (Block '()
                                       (for/list ([ins instrs]) ((assign-homes-instr env) ins))
                                       )))))]
-    ))
+    )
+)
+
+(define (set-atm atm)
+  (match atm
+    [(Reg x) (set x)]
+    [(Var x) (set x)]
+    [(Deref reg v) (set reg)]
+    [_ (set)]
+  )
+)
+
+(define (write-set instr)
+  (match instr
+    [(Instr name args) (set-atm (last args))]
+    [_ (set)]
+  )
+)
+
+(define (read-set  instr)
+  (match instr
+    [(Instr 'movq (list r _)) (set-atm r)]
+    [(Instr _ args) (foldr set-union (set) (for/list ([arg args]) (set-atm arg)))]
+    [(Jmp 'conclusion) (set 'rax 'rsp)]
+    [_ (set)]
+  )
+)
+
+(define (uncover-live-instrs instrs alist)
+  (match instrs
+    ['() alist]
+    [instrs (uncover-live-instrs
+      (cdr instrs)
+      (cons (set-union (set-subtract (car alist) (write-set (car instrs))) (read-set (car instrs))) alist)
+    )]
+  )
+)
+
+(define (uncover-live-block block)
+  (match block
+    [(Block info instrs) (Block (dict-set info 'live-after (uncover-live-instrs (reverse instrs) (list (set)))) instrs)]
+  )
+)
+
+(define (uncover-live p)
+  (match p
+    [(X86Program info blist)
+      (X86Program info (for/list ([block blist]) (cons (car block) (uncover-live-block (cdr block)))))
+    ]
+  )
+)
 
 (define (big-int? n)
   (< 65536 n)
@@ -203,7 +252,6 @@
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (patch-instructions p)
-  ; (error "TODO: code goes here (patch-instructions)"))
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
      (X86Program info (list (cons label (Block '() (patch-instrs instrs)))))
@@ -255,12 +303,12 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-    ;; Uncomment the following passes as you finish them.
     ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
     ("instruction selection" ,select-instructions , interp-x86-0)
-    ("assign homes" ,assign-homes ,interp-x86-0)
-    ("patch instructions" ,patch-instructions ,interp-x86-0)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ("uncover live", uncover-live, interp-x86-0)
+    ; ("assign homes" ,assign-homes ,interp-x86-0)
+    ; ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
     ))
