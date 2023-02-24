@@ -295,7 +295,7 @@
         (hash-set! saturation u (set-add (hash-ref saturation u) (hash-ref color v)))
         (pqueue-decrease-key! pq (hash-ref augment u)))))
   (define (set-pmex s)
-    (let loop ((n 1)) (if (set-member? s n) (loop (+ n 1)) n)))
+    (let loop ((n 0)) (if (set-member? s n) (loop (+ n 1)) n)))
   (define (is-callee-reg c)
     (>= c 7))
 
@@ -317,13 +317,42 @@
   ; Return
   (values color (max 0 (- max-alloc 10)) callee-save-used))
 
+(define (allocate-registers-atm env)
+  (lambda (var)
+    (match var
+      [(Imm _) var]
+      [(Reg _) var]
+      [(Var v) (Reg (color->register (dict-ref env v)))]
+      )
+    )
+  )
+
+(define (allocate-registers-instr env)
+  (lambda (instr)
+    (match instr
+      [(Instr name arg*) (Instr name (for/list ([e arg*]) ((allocate-registers-atm env) e)))]
+      [_ instr]
+      ))
+  )
+
+(define (allocate-registers-block env)
+  (lambda (block)
+    (match block
+      [(Block info instrs) (Block info (for/list ([instr instrs]) ((allocate-registers-instr env) instr)))]
+    )
+
+  )  
+  )
+
 (define (allocate-registers ast)
   (match ast
     [(X86Program info blocks)
       (define-values (color spills callee-save-used) 
         (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
-      (dsatur-graph-coloring '() '())
-      (X86Program info blocks)
+      (define uinfo (dict-set info 'used_callee callee-save-used))
+      (X86Program (dict-set uinfo 'stack-space (* spills 8)) 
+        (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block))))
+      )
     ]
   )
 )
@@ -379,19 +408,34 @@
   )
 
 (define (gen-prelude info)
-  (list
-   (Instr 'pushq (list (Reg 'rbp)))
-   (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp)))
-   (Instr 'subq  (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
+  (append
+   (list
+    (Instr 'pushq (list (Reg 'rbp)))
+    (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp))))
+   ;; Push stuff here
+   (for/list ([var (set->list (dict-ref info 'used_callee))])
+     (Instr 'pushq (list (Reg var))))
+  
+  (list 
+   (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
+                  (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                        (Reg 'rsp))))
    (Jmp 'start)
-   )
+   ))
   )
 
 (define (gen-conclusion info)
-  (list
-   (Instr 'addq (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
+  (append
+   (list
+    (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
+                   (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                         (Reg 'rsp)))))
+   ;; Pop stuff here
+   (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
+     (Instr 'popq (list (Reg var))))
+    (list 
    (Instr 'popq (list (Reg 'rbp)))
-   (Retq)
+   (Retq))
    )
   )
 
@@ -425,8 +469,8 @@
     ("uncover live", uncover-live, interp-x86-0)
     ("build interference", build-interference, interp-x86-0)
     ("allocate registers", allocate-registers, interp-x86-0)
-    ("vis", igviz)
+    ; ("vis", igviz)
     ; ("assign homes" ,assign-homes ,interp-x86-0)
-    ; ("patch instructions" ,patch-instructions ,interp-x86-0)
-    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
+    ("patch instructions" ,patch-instructions ,interp-x86-0)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
     ))
