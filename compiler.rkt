@@ -323,7 +323,7 @@
       [(Imm _) var]
       [(Reg _) var]
       [(Var v) (let ([c (dict-ref env v)])
-      (cond [(>= c 11)(Deref 'rbp (* (- c 6) 8))]
+      (cond [(>= c 11)(Deref 'rbp (- (* (- c 6) 8)))]
             [else (Reg (color->register (dict-ref env v)))]
       )
       )]
