@@ -337,17 +337,29 @@
   )
 
 (define (gen-prelude info)
-  (list
-   (Instr 'pushq (list (Reg 'rbp)))
-   (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp)))
-   (Instr 'subq  (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
+  (append
+   (list
+    (Instr 'pushq (list (Reg 'rbp)))
+    (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp))))
+   ;; Push stuff here
+   (for/list ([var (set->list (dict-ref info 'used_callee))])
+     (Instr 'pushq (list (Reg var))))
+   (Instr 'subq (let [(C (length (dict-ref info 'used_callee)))]
+                  (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C) C)))
+                        (Reg 'rsp))))
    (Jmp 'start)
    )
   )
 
 (define (gen-conclusion info)
-  (list
-   (Instr 'addq (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
+  (append
+   (list
+    (Instr 'subq (let [(C (length (dict-ref info 'used_callee)))]
+                   (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C) C)))
+                         (Reg 'rsp)))))
+   ;; Pop stuff here
+   (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
+     (Instr 'popq (list (Reg var))))
    (Instr 'popq (list (Reg 'rbp)))
    (Retq)
    )
