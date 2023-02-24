@@ -271,20 +271,62 @@
 ;;  Not used for register allocation
 ;;    -1: rax, -2: rsp, -3: rbp, -4: r11, -5: r15
 
-; (define (dsatur-graph-coloring G lvars)
-;   (define (cmp a b)
-;     (>= (set-count )
+(define (dsatur-graph-coloring G lvars)
 
-;   ))
-; )
+  ; Create necessary datastructures
+  (define saturation (make-hash)) ; saturation(u) = {c | ∃v.v ∈ adjacent(u) and color(v) = c}
+  (define color (make-hash)) ; color(v) : variable -> color
+  (define augment (make-hash)) ; augment(v) : variable -> pq node for key decrements
+  (define callee-save-used (set))
+  (define (cmp a b)
+    (>= (set-count (hash-ref saturation a)) (set-count (hash-ref saturation b))))
+  (define pq (make-pqueue cmp))
+  (define max-alloc 0)
+
+  ; Define helper functions
+  (define (is-register? r)(set-member? registers r))
+  (define (is-var? r)(not (set-member? registers r)))
+  (define (init-saturation v)
+    (let ([adj-v (filter is-register? (sequence->list (in-neighbors G v)))])
+      (hash-set! saturation v (list->set (map register->color adj-v)))))
+  (define (upd-saturation-neighbors v)
+    (let ([adj-v (filter is-var? (sequence->list (in-neighbors G v)))])
+      (for ([u adj-v]) 
+        (hash-set! saturation u (set-add (hash-ref saturation u) (hash-ref color v)))
+        (pqueue-decrease-key! pq (hash-ref augment u)))))
+  (define (set-pmex s)
+    (let loop ((n 1)) (if (set-member? s n) (loop (+ n 1)) n)))
+  (define (is-callee-reg c)
+    (>= c 7))
+
+  ; Initialize the priority queue and saturation values
+  (for ([var lvars])
+    (init-saturation (car var))
+    (hash-set! augment (car var) (pqueue-push! pq (car var))))
+
+  ; Run DSATUR
+  (while (> (pqueue-count pq) 0)
+    (let ([v (pqueue-pop! pq)])
+      (let ([c (set-pmex (hash-ref saturation v))])
+        (set! max-alloc (max max-alloc c)) ; update the value of the highest alloc we had to do
+        (hash-set! color v c) ; assign c to color(v)
+        (upd-saturation-neighbors v)
+        (cond [(is-callee-reg c) (set-add callee-save-used c)])
+        )))
+
+  ; Return
+  (values color (max 0 (- max-alloc 10)) callee-save-used))
 
 (define (allocate-registers ast)
   (match ast
     [(X86Program info blocks)
-     (X86Program info blocks)
-     ]
-    )
+      (define-values (color spills callee-save-used) 
+        (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
+      (dsatur-graph-coloring '() '())
+      (X86Program info blocks)
+    ]
   )
+)
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
