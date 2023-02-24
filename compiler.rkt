@@ -9,6 +9,7 @@
 (require "utilities.rkt")
 (require "interp.rkt")
 (require "multigraph.rkt")
+(require "priority_queue.rkt")
 (provide (all-defined-out))
 (require graph)
 
@@ -238,8 +239,8 @@
   (match ast
     [(X86Program info blocks)
      (define G (undirected-graph '()))
-     (for ([(var _) (dict-ref info 'locals-types)])(add-vertex! G var))
-     (define ublocks (for/list ([(label block) (blocks)]) (cons label (build-interference-aux block G))))
+     (for ([var (dict-ref info 'locals-types)])(add-vertex! G (car var)))
+     (define ublocks (for/list ([(label block) (in-dict blocks)]) (cons label (build-interference-aux block G))))
      (define uinfo (dict-set info 'conflicts G))
      (X86Program uinfo ublocks)]))
 
@@ -254,6 +255,9 @@
 ;;  Not used for register allocation
 ;;    -1: rax, -2: rsp, -3: rbp, -4: r11, -5: r15
 
+; (define (dsatur-graph-coloring G lvars)
+
+; )
 
 (define (allocate-registers ast)
   (match ast
