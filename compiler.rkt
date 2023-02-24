@@ -8,7 +8,10 @@
 (require "type-check-Cvar.rkt")
 (require "utilities.rkt")
 (require "interp.rkt")
+(require "multigraph.rkt")
+(require "priority_queue.rkt")
 (provide (all-defined-out))
+(require graph)
 
 
 (define (uniquify_exp env)
@@ -56,6 +59,7 @@
     )
   )
 
+;; explicate-control : R1 -> C0
 (define (explicate-control-tail e)
   (match e
     [(Var x) (Return (Var x))]
@@ -76,13 +80,12 @@
     )
   )
 
-;; explicate-control : R1 -> C0
 (define (explicate-control p)
   (match p
     [(Program info body) (CProgram info (list (cons 'start (explicate-control-tail body))))]
     ))
 
-
+;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions-atm atm)
   (match atm
     [(Var _) atm]
@@ -94,7 +97,7 @@
   (match stmt
     [(Assign v exp) (match exp
                       [(? is-atom? exp) (list (Instr 'movq (list (select-instructions-atm exp) v)))]
-                      [(Prim 'read '()) (list (Callq 'read_int 1) (Instr 'movq (list (Reg 'rax) v)))]
+                      [(Prim 'read '()) (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) v)))]
                       [(Prim '+ (list v1 v2)) (list
                                                (Instr 'movq (list (select-instructions-atm v1) (Reg 'rax)))
                                                (Instr 'addq (list (select-instructions-atm v2) (Reg 'rax)))
@@ -120,12 +123,12 @@
     )
   )
 
-;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions p)
   (match p
     [(CProgram info (list (cons label exp))) (X86Program info (list (cons label (Block '() (select-instructions-tail exp '())))))]
     ))
 
+;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (gen-locs locals-types env cnt)
   (match locals-types
     ['() (values env cnt)]
@@ -151,9 +154,7 @@
       ))
   )
 
-;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (assign-homes p)
-  ; (error "TODO: code goes here (assign-homes)"))
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
      (let-values
@@ -163,8 +164,204 @@
                                (Block '()
                                       (for/list ([ins instrs]) ((assign-homes-instr env) ins))
                                       )))))]
-    ))
+    )
+  )
 
+;; uncover-live
+(define (set-atm atm)
+  (match atm
+    [(Reg x) (set x)]
+    [(Var x) (set x)]
+    [(Deref reg v) (set reg)]
+    [_ (set)]
+    )
+  )
+
+(define (list-atm atm)
+  (match atm
+    [(Reg x) (list x)]
+    [(Var x) (list x)]
+    [(Deref reg v) (list reg)]
+    [_ (list)]
+    )
+  )
+
+(define (write-set instr)
+  (match instr
+    [(Instr name args) (set-atm (last args))]
+    [_ (set)]
+    )
+  )
+
+(define (read-set  instr)
+  (match instr
+    [(Instr 'movq (list r _)) (set-atm r)]
+    [(Instr _ args) (foldr set-union (set) (for/list ([arg args]) (set-atm arg)))]
+    [(Jmp 'conclusion) (set 'rax 'rsp)]
+    [_ (set)]
+    )
+  )
+
+(define (uncover-live-instrs instrs alist)
+  (match instrs
+    ['() alist]
+    [instrs (uncover-live-instrs
+             (cdr instrs)
+             (cons (set-union (set-subtract (car alist) (write-set (car instrs))) (read-set (car instrs))) alist)
+             )]
+    )
+  )
+
+(define (uncover-live-block block)
+  (match block
+    [(Block info instrs) (Block (dict-set info 'live-after (uncover-live-instrs (reverse instrs) (list (set)))) instrs)]
+    )
+  )
+
+(define (uncover-live p)
+  (match p
+    [(X86Program info blist)
+     (X86Program info (for/list ([block blist]) (cons (car block) (uncover-live-block (cdr block)))))
+     ]
+    )
+  )
+
+;; build-interference :
+(define (add-edges G s1 s2 nop)
+  (for ([u s1])
+    (for ([v s2])
+      (cond [(and (not (member u nop)) (not (member u s2))) (add-edge! G u v)]))))
+
+(define (build-interference-aux S G)
+  (match S
+    [(Block info instrs)
+     (let ([live-after (dict-ref info 'live-after)])
+       (for/list ([I instrs][L live-after])
+         (match I
+           [(Instr 'movq (list s d)) (add-edges G L (list-atm d) (list-atm s))]
+           [_ (add-edges G L (set->list (write-set I)) '())]
+           )
+         )
+       (Block (dict-remove info 'live-after) instrs))]))
+
+(define (build-interference ast)
+  (match ast
+    [(X86Program info blocks)
+     (define G (undirected-graph '()))
+     (for ([var (dict-ref info 'locals-types)])(add-vertex! G (car var)))
+     (for ([reg (set->list registers)]) (add-vertex! G reg))
+     (define ublocks (for/list ([(label block) (in-dict blocks)]) (cons label (build-interference-aux block G))))
+     (define uinfo (dict-set info 'conflicts G))
+     (X86Program uinfo ublocks)]))
+
+(define (igviz ast)
+  (match ast
+    [(X86Program info blocks)
+     (graphviz (dict-ref info 'conflicts))])
+  )
+
+;; allocate-registers: pseudo-x86 -> pseudo-x86
+;;
+;;  Register-Color correspondence
+;;
+;;  Used for register allocation:
+;;    0: rcx, 1: rdx, 2: rsi, 3: rdi, 4: r8, 5: r9,
+;;    6: r10, 7: rbx, 8: r12, 9: r13, 10: r14, 11+: Stack
+;;
+;;  Not used for register allocation
+;;    -1: rax, -2: rsp, -3: rbp, -4: r11, -5: r15
+
+(define (dsatur-graph-coloring G lvars)
+
+  ; Create necessary datastructures
+  (define saturation (make-hash)) ; saturation(u) = {c | ∃v.v ∈ adjacent(u) and color(v) = c}
+  (define color (make-hash)) ; color(v) : variable -> color
+  (define augment (make-hash)) ; augment(v) : variable -> pq node for key decrements
+  (define callee-save-used (set))
+  (define (cmp a b)
+    (>= (set-count (hash-ref saturation a)) (set-count (hash-ref saturation b))))
+  (define pq (make-pqueue cmp))
+  (define max-alloc 0)
+
+  ; Define helper functions
+  (define (is-register? r)(set-member? registers r))
+  (define (is-var? r)(not (set-member? registers r)))
+  (define (init-saturation v)
+    (let ([adj-v (filter is-register? (sequence->list (in-neighbors G v)))])
+      (hash-set! saturation v (list->set (map register->color adj-v)))))
+  (define (upd-saturation-neighbors v)
+    (let ([adj-v (filter is-var? (sequence->list (in-neighbors G v)))])
+      (for ([u adj-v]) 
+        (hash-set! saturation u (set-add (hash-ref saturation u) (hash-ref color v)))
+        (pqueue-decrease-key! pq (hash-ref augment u)))))
+  (define (set-pmex s)
+    (let loop ((n 0)) (if (set-member? s n) (loop (+ n 1)) n)))
+  (define (is-callee-reg c)
+    (>= c 7))
+
+  ; Initialize the priority queue and saturation values
+  (for ([var lvars])
+    (init-saturation (car var))
+    (hash-set! augment (car var) (pqueue-push! pq (car var))))
+
+  ; Run DSATUR
+  (while (> (pqueue-count pq) 0)
+    (let ([v (pqueue-pop! pq)])
+      (let ([c (set-pmex (hash-ref saturation v))])
+        (set! max-alloc (max max-alloc c)) ; update the value of the highest alloc we had to do
+        (hash-set! color v c) ; assign c to color(v)
+        (upd-saturation-neighbors v)
+        (cond [(is-callee-reg c) (set-add callee-save-used c)])
+        )))
+
+  ; Return
+  (values color (max 0 (- max-alloc 10)) callee-save-used))
+
+(define (allocate-registers-atm env)
+  (lambda (var)
+    (match var
+      [(Imm _) var]
+      [(Reg _) var]
+      [(Var v) (let ([c (dict-ref env v)])
+      (cond [(>= c 11)(Deref 'rbp (- (* (- c 6) 8)))]
+            [else (Reg (color->register (dict-ref env v)))]
+      )
+      )]
+      )
+    )
+  )
+
+(define (allocate-registers-instr env)
+  (lambda (instr)
+    (match instr
+      [(Instr name arg*) (Instr name (for/list ([e arg*]) ((allocate-registers-atm env) e)))]
+      [_ instr]
+      ))
+  )
+
+(define (allocate-registers-block env)
+  (lambda (block)
+    (match block
+      [(Block info instrs) (Block info (for/list ([instr instrs]) ((allocate-registers-instr env) instr)))]
+    )
+
+  )  
+  )
+
+(define (allocate-registers ast)
+  (match ast
+    [(X86Program info blocks)
+      (define-values (color spills callee-save-used) 
+        (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
+      (define uinfo (dict-set info 'used_callee callee-save-used))
+      (X86Program (dict-set uinfo 'stack-space (* spills 8)) 
+        (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block))))
+      )
+    ]
+  )
+)
+
+;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
   (< 65536 n)
   )
@@ -174,6 +371,7 @@
     ['() '()]
     [(list ins rest ...)
      (match ins
+       [(Instr 'movq (list a a)) (patch-instrs rest)]
        [(Instr name (list (Deref reg1 off1) (Deref reg2 off2)))
         (append (list
                  (Instr 'movq (list (Deref reg1 off1) (Reg 'rax)))
@@ -201,9 +399,7 @@
     )
   )
 
-;; patch-instructions : psuedo-x86 -> x86
 (define (patch-instructions p)
-  ; (error "TODO: code goes here (patch-instructions)"))
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
      (X86Program info (list (cons label (Block '() (patch-instrs instrs)))))
@@ -213,33 +409,48 @@
 
 (define (round-16 n)
   (if (equal? 0 (modulo n 16)) n (* 16 (+ (quotient n 16) 1)))
-)
+  )
 
 (define (gen-prelude info)
-  (list
-   (Instr 'pushq (list (Reg 'rbp)))
-   (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp)))
-   (Instr 'subq  (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
+  (append
+   (list
+    (Instr 'pushq (list (Reg 'rbp)))
+    (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp))))
+   ;; Push stuff here
+   (for/list ([var (set->list (dict-ref info 'used_callee))])
+     (Instr 'pushq (list (Reg var))))
+  
+  (list 
+   (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
+                  (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                        (Reg 'rsp))))
    (Jmp 'start)
-   )
+   ))
   )
 
 (define (gen-conclusion info)
-  (list
-   (Instr 'addq (list (Imm (round-16 (dict-ref info 'stack-space))) (Reg 'rsp)))
+  (append
+   (list
+    (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
+                   (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                         (Reg 'rsp)))))
+   ;; Pop stuff here
+   (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
+     (Instr 'popq (list (Reg var))))
+    (list 
    (Instr 'popq (list (Reg 'rbp)))
-   (Retq)
+   (Retq))
    )
   )
 
+;; prelude-and-conclusion : x86 -> x86
 (define (main-block)
   (match (system-type 'os)
     ['macos '_main]
     [_ 'main]
+    )
   )
-)
 
-;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
@@ -255,12 +466,15 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-    ;; Uncomment the following passes as you finish them.
     ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
     ("instruction selection" ,select-instructions , interp-x86-0)
-    ("assign homes" ,assign-homes ,interp-x86-0)
+    ("uncover live", uncover-live, interp-x86-0)
+    ("build interference", build-interference, interp-x86-0)
+    ("allocate registers", allocate-registers, interp-x86-0)
+    ; ("vis", igviz)
+    ; ("assign homes" ,assign-homes ,interp-x86-0)
     ("patch instructions" ,patch-instructions ,interp-x86-0)
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
     ))
