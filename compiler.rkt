@@ -277,6 +277,23 @@
 
 ;   ))
 ; )
+(define (allocate-registers-atm env)
+  (lambda (var)
+    (match var
+      [(Imm _) var]
+      [(Reg _) var]
+      [(Var v) (color->register (dict-ref env v))]
+      )
+    )
+  )
+
+(define (allocate-registers-instr env)
+  (lambda (instr)
+    (match instr
+      [(Instr name arg*) (Instr name (for/list ([e arg*]) ((allocate-registers-atm env) e)))]
+      [_ instr]
+      ))
+  )
 
 (define (allocate-registers ast)
   (match ast
