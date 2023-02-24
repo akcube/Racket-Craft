@@ -177,6 +177,15 @@
     )
   )
 
+(define (list-atm atm)
+  (match atm
+    [(Reg x) (list x)]
+    [(Var x) (list x)]
+    [(Deref reg v) (list reg)]
+    [_ (list)]
+    )
+  )
+
 (define (write-set instr)
   (match instr
     [(Instr name args) (set-atm (last args))]
@@ -218,31 +227,38 @@
   )
 
 ;; build-interference :
-(define (add-edges G s1 s2 nop)(
+(define (add-edges G s1 s2 nop)
   (for ([u s1])
     (for ([v s2])
-      (cond [(and (not (member u nop)) (not (member u s2))) (add-edge! G u v)])))))
+      (cond [(and (not (member u nop)) (not (member u s2))) (add-edge! G u v)]))))
 
 (define (build-interference-aux S G)
   (match S
-    [(Block info instrs)(
-      (let ([live-after (dict-ref info 'live-after)])(
-          (for ([I instrs][L live-after])(
-            (match I
-              [(Instr 'movq (list s d)) (add-edges G L (list d) (list s))]
-              [_ (add-edges G L (set->list (write-set I)) '())]
-            )
-          ))
-          (Block (dict-remove info 'live-after) instrs))))]))
+    [(Block info instrs)
+     (let ([live-after (dict-ref info 'live-after)])
+       (for/list ([I instrs][L live-after])
+         (match I
+           [(Instr 'movq (list s d)) (add-edges G L (list-atm d) (list-atm s))]
+           [_ (add-edges G L (set->list (write-set I)) '())]
+           )
+         )
+       (Block (dict-remove info 'live-after) instrs))]))
 
 (define (build-interference ast)
   (match ast
     [(X86Program info blocks)
      (define G (undirected-graph '()))
      (for ([var (dict-ref info 'locals-types)])(add-vertex! G (car var)))
+     (for ([reg (set->list registers)]) (add-vertex! G reg))
      (define ublocks (for/list ([(label block) (in-dict blocks)]) (cons label (build-interference-aux block G))))
      (define uinfo (dict-set info 'conflicts G))
      (X86Program uinfo ublocks)]))
+
+(define (igviz ast)
+  (match ast
+    [(X86Program info blocks)
+     (graphviz (dict-ref info 'conflicts))])
+  )
 
 ;; allocate-registers: pseudo-x86 -> pseudo-x86
 ;;
@@ -265,10 +281,10 @@
 (define (allocate-registers ast)
   (match ast
     [(X86Program info blocks)
-      (X86Program info blocks)
-    ]
+     (X86Program info blocks)
+     ]
+    )
   )
-)
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
@@ -280,6 +296,7 @@
     ['() '()]
     [(list ins rest ...)
      (match ins
+       [(Instr 'movq (list a a)) (patch-instrs rest)]
        [(Instr name (list (Deref reg1 off1) (Deref reg2 off2)))
         (append (list
                  (Instr 'movq (list (Deref reg1 off1) (Reg 'rax)))
@@ -366,6 +383,7 @@
     ("uncover live", uncover-live, interp-x86-0)
     ("build interference", build-interference, interp-x86-0)
     ("allocate registers", allocate-registers, interp-x86-0)
+    ("vis", igviz)
     ; ("assign homes" ,assign-homes ,interp-x86-0)
     ; ("patch instructions" ,patch-instructions ,interp-x86-0)
     ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
