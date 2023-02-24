@@ -220,10 +220,7 @@
 (define (add-edges G s1 s2 nop)(
   (for ([u s1])
     (for ([v s2])
-      (cond [(and (not (member u nop)) (not (member u s2))) (add-edge! G u v)])
-    )
-  )
-))
+      (cond [(and (not (member u nop)) (not (member u s2))) (add-edge! G u v)])))))
 
 (define (build-interference-aux S G)
   (match S
@@ -231,7 +228,7 @@
       (let ([live-after (dict-ref info 'live-after)])(
           (for ([I instrs])(
             (match I
-              [(Instr 'movq (list s d)) (add-edges G live-after '(d) '(s))]
+              [(Instr 'movq (list s d)) (add-edges G live-after (list d) (list s))]
               [_ (add-edges G live-after (set->list (write-set I)) '())]
             )
           ))
@@ -243,8 +240,28 @@
      (define G (undirected-graph '()))
      (for ([(var _) (dict-ref info 'locals-types)])(add-vertex! G var))
      (define ublocks (for/list ([(label block) (blocks)]) (cons label (build-interference-aux block G))))
-     (define uinfo (dict-set info 'interference-graph G))
+     (define uinfo (dict-set info 'conflicts G))
      (X86Program uinfo ublocks)]))
+
+;; allocate-registers: pseudo-x86 -> pseudo-x86
+;;
+;;  Register-Color correspondence
+;;
+;;  Used for register allocation:
+;;    0: rcx, 1: rdx, 2: rsi, 3: rdi, 4: r8, 5: r9,
+;;    6: r10, 7: rbx, 8: r12, 9: r13, 10: r14, 11+: Stack
+;;
+;;  Not used for register allocation
+;;    -1: rax, -2: rsp, -3: rbp, -4: r11, -5: r15
+
+
+(define (allocate-registers ast)
+  (match ast
+    [(X86Program info blocks)
+      (X86Program info blocks)
+    ]
+  )
+)
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
@@ -340,6 +357,8 @@
     ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
     ("instruction selection" ,select-instructions , interp-x86-0)
     ("uncover live", uncover-live, interp-x86-0)
+    ("build interference", build-interference, interp-x86-0)
+    ("allocate registers", allocate-registers, interp-x86-0)
     ; ("assign homes" ,assign-homes ,interp-x86-0)
     ; ("patch instructions" ,patch-instructions ,interp-x86-0)
     ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-0)
