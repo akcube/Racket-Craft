@@ -227,10 +227,10 @@
   (match S
     [(Block info instrs)(
       (let ([live-after (dict-ref info 'live-after)])(
-          (for ([I instrs])(
+          (for ([I instrs][L live-after])(
             (match I
-              [(Instr 'movq (list s d)) (add-edges G live-after (list d) (list s))]
-              [_ (add-edges G live-after (set->list (write-set I)) '())]
+              [(Instr 'movq (list s d)) (add-edges G L (list d) (list s))]
+              [_ (add-edges G L (set->list (write-set I)) '())]
             )
           ))
           (Block (dict-remove info 'live-after) instrs))))]))
@@ -256,7 +256,10 @@
 ;;    -1: rax, -2: rsp, -3: rbp, -4: r11, -5: r15
 
 ; (define (dsatur-graph-coloring G lvars)
+;   (define (cmp a b)
+;     (>= (set-count )
 
+;   ))
 ; )
 
 (define (allocate-registers ast)
