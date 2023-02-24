@@ -8,7 +8,9 @@
 (require "type-check-Cvar.rkt")
 (require "utilities.rkt")
 (require "interp.rkt")
+(require "multigraph.rkt")
 (provide (all-defined-out))
+(require graph)
 
 
 (define (uniquify_exp env)
@@ -56,6 +58,7 @@
     )
   )
 
+;; explicate-control : R1 -> C0
 (define (explicate-control-tail e)
   (match e
     [(Var x) (Return (Var x))]
@@ -76,13 +79,12 @@
     )
   )
 
-;; explicate-control : R1 -> C0
 (define (explicate-control p)
   (match p
     [(Program info body) (CProgram info (list (cons 'start (explicate-control-tail body))))]
     ))
 
-
+;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions-atm atm)
   (match atm
     [(Var _) atm]
@@ -120,12 +122,12 @@
     )
   )
 
-;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions p)
   (match p
     [(CProgram info (list (cons label exp))) (X86Program info (list (cons label (Block '() (select-instructions-tail exp '())))))]
     ))
 
+;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (gen-locs locals-types env cnt)
   (match locals-types
     ['() (values env cnt)]
@@ -151,7 +153,6 @@
       ))
   )
 
-;; assign-homes : pseudo-x86 -> pseudo-x86
 (define (assign-homes p)
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
@@ -163,23 +164,24 @@
                                       (for/list ([ins instrs]) ((assign-homes-instr env) ins))
                                       )))))]
     )
-)
+  )
 
+;; uncover-live
 (define (set-atm atm)
   (match atm
     [(Reg x) (set x)]
     [(Var x) (set x)]
     [(Deref reg v) (set reg)]
     [_ (set)]
+    )
   )
-)
 
 (define (write-set instr)
   (match instr
     [(Instr name args) (set-atm (last args))]
     [_ (set)]
+    )
   )
-)
 
 (define (read-set  instr)
   (match instr
@@ -187,33 +189,64 @@
     [(Instr _ args) (foldr set-union (set) (for/list ([arg args]) (set-atm arg)))]
     [(Jmp 'conclusion) (set 'rax 'rsp)]
     [_ (set)]
+    )
   )
-)
 
 (define (uncover-live-instrs instrs alist)
   (match instrs
     ['() alist]
     [instrs (uncover-live-instrs
-      (cdr instrs)
-      (cons (set-union (set-subtract (car alist) (write-set (car instrs))) (read-set (car instrs))) alist)
-    )]
+             (cdr instrs)
+             (cons (set-union (set-subtract (car alist) (write-set (car instrs))) (read-set (car instrs))) alist)
+             )]
+    )
   )
-)
 
 (define (uncover-live-block block)
   (match block
     [(Block info instrs) (Block (dict-set info 'live-after (uncover-live-instrs (reverse instrs) (list (set)))) instrs)]
+    )
   )
-)
 
 (define (uncover-live p)
   (match p
     [(X86Program info blist)
-      (X86Program info (for/list ([block blist]) (cons (car block) (uncover-live-block (cdr block)))))
-    ]
+     (X86Program info (for/list ([block blist]) (cons (car block) (uncover-live-block (cdr block)))))
+     ]
+    )
   )
-)
 
+;; build-interference :
+(define (add-edges G s1 s2 nop)(
+  (for ([u s1])
+    (for ([v s2])
+      (cond [(and (not (member u nop)) (not (member u s2))) (add-edge! G u v)])
+    )
+  )
+))
+
+(define (build-interference-aux S G)
+  (match S
+    [(Block info instrs)(
+      (let ([live-after (dict-ref info 'live-after)])(
+          (for ([I instrs])(
+            (match I
+              [(Instr 'movq (list s d)) (add-edges G live-after '(d) '(s))]
+              [_ (add-edges G live-after (set->list (write-set I)) '())]
+            )
+          ))
+          (Block (dict-remove info 'live-after) instrs))))]))
+
+(define (build-interference ast)
+  (match ast
+    [(X86Program info blocks)
+     (define G (undirected-graph '()))
+     (for ([(var _) (dict-ref info 'locals-types)])(add-vertex! G var))
+     (define ublocks (for/list ([(label block) (blocks)]) (cons label (build-interference-aux block G))))
+     (define uinfo (dict-set info 'interference-graph G))
+     (X86Program uinfo ublocks)]))
+
+;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
   (< 65536 n)
   )
@@ -250,7 +283,6 @@
     )
   )
 
-;; patch-instructions : psuedo-x86 -> x86
 (define (patch-instructions p)
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
@@ -261,7 +293,7 @@
 
 (define (round-16 n)
   (if (equal? 0 (modulo n 16)) n (* 16 (+ (quotient n 16) 1)))
-)
+  )
 
 (define (gen-prelude info)
   (list
@@ -280,14 +312,14 @@
    )
   )
 
+;; prelude-and-conclusion : x86 -> x86
 (define (main-block)
   (match (system-type 'os)
     ['macos '_main]
     [_ 'main]
+    )
   )
-)
 
-;; prelude-and-conclusion : x86 -> x86
 (define (prelude-and-conclusion p)
   (match p
     [(X86Program info (list (cons label (Block '() instrs))))
