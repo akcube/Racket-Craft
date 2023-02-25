@@ -277,7 +277,7 @@
   (define saturation (make-hash)) ; saturation(u) = {c | ∃v.v ∈ adjacent(u) and color(v) = c}
   (define color (make-hash)) ; color(v) : variable -> color
   (define augment (make-hash)) ; augment(v) : variable -> pq node for key decrements
-  (define callee-save-used (set))
+  (define callee-save-used (mutable-set))
   (define (cmp a b)
     (>= (set-count (hash-ref saturation a)) (set-count (hash-ref saturation b))))
   (define pq (make-pqueue cmp))
@@ -297,7 +297,7 @@
   (define (set-pmex s)
     (let loop ((n 0)) (if (set-member? s n) (loop (+ n 1)) n)))
   (define (is-callee-reg c)
-    (>= c 7))
+    (and (>= c 7) (<= c 10)))
 
   ; Initialize the priority queue and saturation values
   (for ([var lvars])
@@ -311,7 +311,7 @@
         (set! max-alloc (max max-alloc c)) ; update the value of the highest alloc we had to do
         (hash-set! color v c) ; assign c to color(v)
         (upd-saturation-neighbors v)
-        (cond [(is-callee-reg c) (set-add callee-save-used c)])
+        (cond [(is-callee-reg c) (set-add! callee-save-used c)])
         )))
 
   ; Return
@@ -418,7 +418,7 @@
     (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp))))
    ;; Push stuff here
    (for/list ([var (set->list (dict-ref info 'used_callee))])
-     (Instr 'pushq (list (Reg var))))
+     (Instr 'pushq (list (Reg (color->register var)))))
   
   (list 
    (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
@@ -436,7 +436,7 @@
                          (Reg 'rsp)))))
    ;; Pop stuff here
    (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
-     (Instr 'popq (list (Reg var))))
+     (Instr 'popq (list (Reg (color->register var)))))
     (list 
    (Instr 'popq (list (Reg 'rbp)))
    (Retq))
