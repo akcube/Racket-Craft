@@ -38,8 +38,10 @@
     (match e
       [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
+      [(Bool b) (Bool b)]
       [(Let x e body) (let ([n (gensym x)]) (Let n ((uniquify_exp env) e) ((uniquify_exp (dict-set env x n)) body)) )]
       [(Prim op es) (Prim op (for/list ([e es]) ((uniquify_exp env) e)))]
+      [(If cond a b) (If ((uniquify_exp env) cond) ((uniquify_exp env) a) ((uniquify_exp env) b))]
       ))
   )
 ;; uniquify : R1 -> R1
@@ -486,6 +488,7 @@
 (define compiler-passes
   `(
     ("shrink", shrink, interp-Lif, type-check-Lif)
+    ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
