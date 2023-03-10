@@ -2,9 +2,11 @@
 (require racket/set racket/stream)
 (require racket/fixnum)
 (require "interp-Lint.rkt")
+(require "interp-Lif.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
 (require "type-check-Lvar.rkt")
+(require "type-check-Lif.rkt")
 (require "type-check-Cvar.rkt")
 (require "utilities.rkt")
 (require "interp.rkt")
@@ -13,6 +15,23 @@
 (provide (all-defined-out))
 (require graph)
 
+(define (shrink-exp e)
+  (match e
+    [(Prim 'and (list a b)) (If (shrink-exp a) (shrink-exp b) (Bool #f))]
+    [(Prim 'or  (list a b)) (If (shrink-exp a) (Bool #t) (shrink-exp b))]
+    [(Let x e body) (Let x (shrink-exp e) (shrink-exp body))]
+    [(Prim op es) (Prim op (map shrink-exp es))]
+    [(If cond a b) (If (shrink-exp cond) (shrink-exp a) (shrink-exp b))]
+    [else e]
+    
+    )
+  )
+
+(define (shrink p)
+  (match p
+    [(Program info e) (Program info (shrink-exp e))]
+    )
+  )
 
 (define (uniquify_exp env)
   (lambda (e)
@@ -466,6 +485,7 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
+    ("shrink", shrink, interp-Lif, type-check-Lif)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
