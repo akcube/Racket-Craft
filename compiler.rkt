@@ -15,6 +15,7 @@
 (provide (all-defined-out))
 (require graph)
 
+;; Shrink pass
 (define (shrink-exp e)
   (match e
     [(Prim 'and (list a b)) (If (shrink-exp a) (shrink-exp b) (Bool #f))]
@@ -33,6 +34,7 @@
     )
   )
 
+;; Uniquify pass
 (define (uniquify_exp env)
   (lambda (e)
     (match e
@@ -44,7 +46,7 @@
       [(If cond a b) (If ((uniquify_exp env) cond) ((uniquify_exp env) a) ((uniquify_exp env) b))]
       ))
   )
-;; uniquify : R1 -> R1
+
 (define (uniquify p)
   (match p
     [(Program '() e) (Program '() ((uniquify_exp '()) e))])
@@ -52,14 +54,16 @@
 
 ;; remove-complex-opera* : R1 -> R1
 (define (is-atom? x)
-  (or (Int? x)  (Var? x)))
+  (or (Int? x)  (Var? x) (Bool? x)))
 
 (define (remove-complex-opera* p)
   (match p
     [(Program '() e) (Program '() (remove-complex-opera* e))]
-    [(Int n) (Int n)]
-    [(Var x) (Var x)]
+    [(Int n)   (Int n)]
+    [(Var x)   (Var x)]
+    [(Bool b)  (Bool b)]
     [(Let x e body) (Let x (remove-complex-opera* e) (remove-complex-opera* body))]
+    [(If con tru els) (If (remove-complex-opera* con) (remove-complex-opera* tru) (remove-complex-opera* els))]
     [(Prim op es) #:when (< 1 (length es)) (foldl
                                             (lambda (x y)
                                               (match* (x y)
@@ -379,8 +383,7 @@
         (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block))))
       )
     ]
-  )
-)
+  ))
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
@@ -428,6 +431,7 @@
     )
   )
 
+;; prelude-and-conclusion : x86 -> x86
 (define (round-16 n)
   (if (equal? 0 (modulo n 16)) n (* 16 (+ (quotient n 16) 1)))
   )
@@ -464,7 +468,6 @@
    )
   )
 
-;; prelude-and-conclusion : x86 -> x86
 (define (main-block)
   (match (system-type 'os)
     ['macos '_main]
@@ -489,6 +492,7 @@
   `(
     ("shrink", shrink, interp-Lif, type-check-Lif)
     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
+    ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
