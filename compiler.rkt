@@ -5,9 +5,11 @@
 (require "interp-Lif.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Cvar.rkt")
+(require "interp-Cif.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Lif.rkt")
 (require "type-check-Cvar.rkt")
+(require "type-check-Cif.rkt")
 (require "utilities.rkt")
 (require "interp.rkt")
 (require "multigraph.rkt")
@@ -24,7 +26,7 @@
     [(Prim op es) (Prim op (map shrink-exp es))]
     [(If cond a b) (If (shrink-exp cond) (shrink-exp a) (shrink-exp b))]
     [else e]
-    
+
     )
   )
 
@@ -89,8 +91,11 @@
   (match e
     [(Var x) (Return (Var x))]
     [(Int n) (Return (Int n))]
+    [(Bool b) (Return (Bool b))]
     [(Let x rhs body) (explicate-assign rhs x (explicate-control-tail body))]
     [(Prim op es) (Return (Prim op es))]
+    [(If cnd thn els) (explicate-pred cnd (explicate-control-tail thn) 
+                                      (explicate-control-tail els))]
     [else (error "explicate_tail unhandled case" e)]
     )
   )
@@ -99,15 +104,43 @@
   (match e
     [(Var y) (Seq (Assign (Var x) (Var y)) cont)]
     [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
+    [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
     [(Let y rhs body) (explicate-assign rhs y (explicate-assign body x cont))]
     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
+    [(If cnd thn els) (explicate-pred cnd (explicate-assign thn x cont)
+                                      (explicate-assign els x cont))]
     [else (error "explicate_assign unhandled case" e)]
     )
   )
 
+(define (explicate-pred cnd thn els)
+  (match cnd
+    [(Var x) (IfStmt (Prim 'eq? (list (Var x) (Bool #t))) (create_block thn)
+                     (create_block els))]
+    [(Let x rhs body) (explicate-assign rhs x (explicate-pred body thn els))]
+    [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list e (Bool #f))) (create_block thn)
+                                  (create_block els))]
+    [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<) (eq? op '>))
+                  (IfStmt (Prim op es) (create_block thn)
+                          (create_block els))]
+    [(Bool b) (if b thn els)]
+    [(If cnd^ thn^ els^) (explicate-pred cnd^ (explicate-pred thn^ thn els)
+                                         (explicate-pred els^ thn els))]
+    [else (error "explicate_pred unhandled case" cnd)]))
+
+(define basic-blocks '())
+
+(define (create_block tail)
+  (match tail
+    [(Goto label) (Goto label)]
+    [else
+     (let ([label (gensym 'block)])
+       (set! basic-blocks (cons (cons label tail) basic-blocks))
+       (Goto label))]))
+
 (define (explicate-control p)
   (match p
-    [(Program info body) (CProgram info (list (cons 'start (explicate-control-tail body))))]
+    [(Program info body) (CProgram info (cons (cons 'start (explicate-control-tail body)) basic-blocks))]
     ))
 
 ;; select-instructions : C0 -> pseudo-x86
@@ -316,7 +349,7 @@
       (hash-set! saturation v (list->set (map register->color adj-v)))))
   (define (upd-saturation-neighbors v)
     (let ([adj-v (filter is-var? (sequence->list (in-neighbors G v)))])
-      (for ([u adj-v]) 
+      (for ([u adj-v])
         (hash-set! saturation u (set-add (hash-ref saturation u) (hash-ref color v)))
         (pqueue-decrease-key! pq (hash-ref augment u)))))
   (define (set-pmex s)
@@ -331,13 +364,13 @@
 
   ; Run DSATUR
   (while (> (pqueue-count pq) 0)
-    (let ([v (pqueue-pop! pq)])
-      (let ([c (set-pmex (hash-ref saturation v))])
-        (set! max-alloc (max max-alloc c)) ; update the value of the highest alloc we had to do
-        (hash-set! color v c) ; assign c to color(v)
-        (upd-saturation-neighbors v)
-        (cond [(is-callee-reg c) (set-add! callee-save-used c)])
-        )))
+         (let ([v (pqueue-pop! pq)])
+           (let ([c (set-pmex (hash-ref saturation v))])
+             (set! max-alloc (max max-alloc c)) ; update the value of the highest alloc we had to do
+             (hash-set! color v c) ; assign c to color(v)
+             (upd-saturation-neighbors v)
+             (cond [(is-callee-reg c) (set-add! callee-save-used c)])
+             )))
 
   ; Return
   (values color (max 0 (- max-alloc 10)) callee-save-used))
@@ -348,10 +381,10 @@
       [(Imm _) var]
       [(Reg _) var]
       [(Var v) (let ([c (dict-ref env v)])
-      (cond [(>= c 11)(Deref 'rbp (- (* (- c 6) 8)))]
-            [else (Reg (color->register (dict-ref env v)))]
-      )
-      )]
+                 (cond [(>= c 11)(Deref 'rbp (- (* (- c 6) 8)))]
+                       [else (Reg (color->register (dict-ref env v)))]
+                       )
+                 )]
       )
     )
   )
@@ -368,22 +401,22 @@
   (lambda (block)
     (match block
       [(Block info instrs) (Block info (for/list ([instr instrs]) ((allocate-registers-instr env) instr)))]
-    )
+      )
 
-  )  
+    )
   )
 
 (define (allocate-registers ast)
   (match ast
     [(X86Program info blocks)
-      (define-values (color spills callee-save-used) 
-        (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
-      (define uinfo (dict-set info 'used_callee callee-save-used))
-      (X86Program (dict-set uinfo 'stack-space (* spills 8)) 
-        (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block))))
-      )
-    ]
-  ))
+     (define-values (color spills callee-save-used)
+       (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
+     (define uinfo (dict-set info 'used_callee callee-save-used))
+     (X86Program (dict-set uinfo 'stack-space (* spills 8))
+                 (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block))))
+                 )
+     ]
+    ))
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
@@ -444,13 +477,13 @@
    ;; Push stuff here
    (for/list ([var (set->list (dict-ref info 'used_callee))])
      (Instr 'pushq (list (Reg (color->register var)))))
-  
-  (list 
-   (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
-                  (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
-                        (Reg 'rsp))))
-   (Jmp 'start)
-   ))
+
+   (list
+    (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
+                   (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                         (Reg 'rsp))))
+    (Jmp 'start)
+    ))
   )
 
 (define (gen-conclusion info)
@@ -462,9 +495,9 @@
    ;; Pop stuff here
    (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
      (Instr 'popq (list (Reg (color->register var)))))
-    (list 
-   (Instr 'popq (list (Reg 'rbp)))
-   (Retq))
+   (list
+    (Instr 'popq (list (Reg 'rbp)))
+    (Retq))
    )
   )
 
@@ -493,6 +526,7 @@
     ("shrink", shrink, interp-Lif, type-check-Lif)
     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
+    ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
