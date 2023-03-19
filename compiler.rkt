@@ -94,7 +94,7 @@
     [(Bool b) (Return (Bool b))]
     [(Let x rhs body) (explicate-assign rhs x (explicate-control-tail body))]
     [(Prim op es) (Return (Prim op es))]
-    [(If cnd thn els) (explicate-pred cnd (explicate-control-tail thn) 
+    [(If cnd thn els) (explicate-pred cnd (explicate-control-tail thn)
                                       (explicate-control-tail els))]
     [else (error "explicate_tail unhandled case" e)]
     )
@@ -148,6 +148,7 @@
   (match atm
     [(Var _) atm]
     [(Int i) (Imm i)]
+    [(Bool b) (Imm (if b 1 0))]
     )
   )
 
@@ -170,20 +171,59 @@
                                                (Instr 'subq (list (select-instructions-atm v2) (Reg 'rax)))
                                                (Instr 'movq (list (Reg 'rax) v))
                                                )]
+                      [(Prim 'not (list v1)) #:when (eq? v1 v)  (list
+                                                                 (Instr 'xorq (list (Imm 1) v))
+                                                                 )]
+                      [(Prim 'not (list v1)) (list
+                                              (Instr 'movq (list (select-instructions-atm v1) v))
+                                              (Instr 'xorq (list (Imm 1) v))
+                                              )]
+                      [(Prim 'eq? (list v1 v2)) (list
+                                                 (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2)))
+                                                 (Instr 'sete (list (Reg 'al)))
+                                                 (Instr 'movzbq (list (Reg 'al) v))
+                                                 )]
+                      [(Prim '< (list v1 v2)) (list
+                                               (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2)))
+                                               (Instr 'setl (list (Reg 'al)))
+                                               (Instr 'movzbq (list (Reg 'al) v))
+                                               )]
+                      [(Prim '> (list v1 v2)) (list
+                                               (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2)))
+                                               (Instr 'setg (list (Reg 'al)))
+                                               (Instr 'movzbq (list (Reg 'al) v))
+                                               )]
+                      [(Prim '<= (list v1 v2)) (list
+                                                (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2)))
+                                                (Instr 'setle (list (Reg 'al)))
+                                                (Instr 'movzbq (list (Reg 'al) v))
+                                                )]
+                      [(Prim '>= (list v1 v2)) (list
+                                                (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2)))
+                                                (Instr 'setge (list (Reg 'al)))
+                                                (Instr 'movzbq (list (Reg 'al) v))
+                                                )]
                       )]
     )
-  )
+)
 
 (define (select-instructions-tail tail seq)
   (match tail
-    [(Return exp) (append seq (select-instructions-stmt (Assign (Reg 'rax) exp)) (list (Jmp 'conclusion)))]
+    ; [(Return exp) (append seq (select-instructions-stmt (Assign (Reg 'rax) exp)) (list (Jmp 'conclusion)))]
+    [(Return exp) (append seq (select-instructions-stmt (Assign (Reg 'rax) exp)))]
+    [(Goto label) (append seq (list (Jmp label)))]
+    [(IfStmt (Prim 'eq? (list v1 v2)) (Goto thn) (Goto els)) (append seq (list (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2))) (JmpIf 'e thn) (Jmp els)))]
+    [(IfStmt (Prim '< (list v1 v2)) (Goto thn) (Goto els)) (append seq (list (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2))) (JmpIf 'l thn) (Jmp els)))]
+    [(IfStmt (Prim '> (list v1 v2)) (Goto thn) (Goto els)) (append seq (list (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2))) (JmpIf 'g thn) (Jmp els)))]
+    [(IfStmt (Prim '>= (list v1 v2)) (Goto thn) (Goto els)) (append seq (list (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2))) (JmpIf 'le thn) (Jmp els)))]
+    [(IfStmt (Prim '<= (list v1 v2)) (Goto thn) (Goto els)) (append seq (list (Instr 'cmpq (list (select-instructions-atm v1) (select-instructions-atm v2))) (JmpIf 'ge thn) (Jmp els)))]
     [(Seq stmt tail) (select-instructions-tail tail (append seq (select-instructions-stmt stmt)))]
     )
   )
 
 (define (select-instructions p)
   (match p
-    [(CProgram info (list (cons label exp))) (X86Program info (list (cons label (Block '() (select-instructions-tail exp '())))))]
+    [(CProgram info blocks) (X86Program info (for/list ([block blocks]) (cons (car block) (Block '() (select-instructions-tail (cdr block) '())))))]
     ))
 
 ;; assign-homes : pseudo-x86 -> pseudo-x86
@@ -527,6 +567,7 @@
     ("uniquify" ,uniquify ,interp-Lif ,type-check-Lif)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("instruction selection" ,select-instructions , interp-pseudo-x86-1)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
