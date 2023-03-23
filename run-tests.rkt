@@ -26,9 +26,9 @@
           (string=? r (car (string-split p "_"))))
         all-tests)))
 
-(interp-tests "cond" type-check-Lif compiler-passes interp-Lif "cond_test" (tests-for "cond"))
+; (interp-tests "cond" type-check-Lif compiler-passes interp-Lif "cond_test" (tests-for "cond"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-; (compiler-tests "cond" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
+(compiler-tests "cond" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
 
