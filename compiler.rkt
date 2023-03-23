@@ -138,6 +138,7 @@
        (Goto label))]))
 
 (define (explicate-control p)
+  (set! basic-blocks '())
   (match p
     [(Program info body) (CProgram info (cons (cons 'start (explicate-control-tail body)) basic-blocks))]
     ))
@@ -605,6 +606,11 @@
                        ))]
     ))
 
+(define (print-as p)
+  (pretty-print p)
+  p
+)
+
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
@@ -614,6 +620,7 @@
     ("uniquify", uniquify, interp-Lif, type-check-Lif)
     ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("printer", print-as, interp-Cif, type-check-Cif)
     ("instruction selection" ,select-instructions , interp-x86-1)
     ("uncover live", uncover-live, interp-x86-1)
     ("build interference", build-interference, interp-x86-1)
