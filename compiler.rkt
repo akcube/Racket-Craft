@@ -5,6 +5,7 @@
 (require "interp-Lif.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Lfun.rkt")
+(require "interp-Lfun-prime.rkt")
 (require "interp-Cvar.rkt")
 (require "interp-Cif.rkt")
 (require "interp-Cfun.rkt")
@@ -696,7 +697,7 @@
   `(
     ("shrink", shrink, interp-Lfun, type-check-Lfun)
     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
-    ("reveal functions", reveal-functions, interp-Lfun, type-check-Lfun)
+    ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ; ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
     ; ("printer", print-as, interp-Lfun, type-check-Lfun)
