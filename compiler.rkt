@@ -368,6 +368,7 @@
 ;; uncover-live
 (define (set-atm atm)
   (match atm
+    [(FunRef label kargs) (FunRef label kargs)]
     [(Reg x) (set x)]
     [(ByteReg x) (set x)]
     [(Var x) (set x)]
@@ -378,6 +379,7 @@
 
 (define (list-atm atm)
   (match atm
+    [(FunRef label kargs) (FunRef label kargs)]
     [(Reg x) (list x)]
     [(ByteReg x) (list x)]
     [(Var x) (list x)]
@@ -388,6 +390,10 @@
 
 (define (write-set instr)
   (match instr
+    [(IndirectCallq addr num-args) (caller-save-for-alloc)]
+    [(Callq addr num-args) (set)] ; only read_int?
+    [(TailJmp addr num-args) (caller-save-for-alloc)]
+    [(Instr 'leaq (list r _)) (set-atm r)]
     [(Jmp label) (set)]
     [(JmpIf cc label) (set)]
     [(Instr 'cmpq _) (set)]
@@ -400,6 +406,12 @@
 
 (define (read-set  instr)
   (match instr
+    [(Instr 'leaq (list s d)) (set-atm s)]
+    [(IndirectCallq addr num-args) 
+      (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
+    [(Callq addr num-args) (set)] ; only read_int?
+    [(TailJmp addr num-args)
+      (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
     [(Jmp 'conclusion) (set 'rax 'rsp)]
     [(Jmp label) (set)]
     [(JmpIf cc label) (set)]
@@ -455,13 +467,12 @@
   (for ([(u block) (in-dict blist)])
     (for ([v (out-blocks block)]) (add-directed-edge! G u v)))
   G)
-; (for/list ([block blist]) (cons (car block) (uncover-live-block (cdr block))))
 
 (define (uncover-live p)
   (match p
-    [(X86Program info blist)
-     (X86Program info (uncover-live-blocks blist (make-cfg blist)))
-     ]))
+    [(ProgramDefs info defs) (ProgramDefs info (map uncover-live defs))]
+    [(Def name param-list rty info blist)
+     (Def name param-list rty info (uncover-live-blocks blist (make-cfg blist)))]))
 
 ;; build-interference :
 (define (add-edges G s1 s2 nop)
@@ -477,6 +488,7 @@
          (match I
            [(Instr 'movq (list s d)) (add-edges G L (list-atm d) (list-atm s))]
            [(Instr 'movzbq (list s d)) (add-edges G L (list-atm d) (list-atm s))]
+           [(Callq addr num-args) (add-edges G L (set->list caller-save-for-alloc) '())]
            [(Instr 'set _) '()]
            [_ (add-edges G L (set->list (write-set I)) '())]
            )
@@ -484,14 +496,15 @@
        (Block (dict-remove info 'live-after) instrs))]))
 
 (define (build-interference ast)
-  (match ast
-    [(X86Program info blocks)
+  (match ast 
+    [(ProgramDefs info defs) (ProgramDefs info (map build-interference defs))]
+    [(Def name param-list rty info blocks)
      (define G (undirected-graph '()))
      (for ([var (dict-ref info 'locals-types)])(add-vertex! G (car var)))
      (for ([reg (set->list registers)]) (add-vertex! G reg))
      (define ublocks (for/list ([(label block) (in-dict blocks)]) (cons label (build-interference-aux block G))))
      (define uinfo (dict-set info 'conflicts G))
-     (X86Program uinfo ublocks)]))
+     (Def name param-list rty ublocks)]))
 
 (define (igviz ast)
   (match ast
@@ -722,10 +735,10 @@
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
+    ("uncover live", uncover-live, interp-x86-1)
+    ("build interference", build-interference, interp-x86-1)
     ; ("printer", print-as, interp-Lfun, type-check-Lfun)
     ; ("instruction selection" ,select-instructions , interp-x86-1)
-    ; ("uncover live", uncover-live, interp-x86-1)
-    ; ("build interference", build-interference, interp-x86-1)
     ; ("allocate registers", allocate-registers, interp-x86-1)
     ; ("patch instructions" ,patch-instructions ,interp-pseudo-x86-1)
     ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-pseudo-x86-1)
