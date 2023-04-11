@@ -4,12 +4,16 @@
 (require "interp-Lint.rkt")
 (require "interp-Lif.rkt")
 (require "interp-Lvar.rkt")
+(require "interp-Lfun.rkt")
 (require "interp-Cvar.rkt")
 (require "interp-Cif.rkt")
+(require "interp-Cfun.rkt")
 (require "type-check-Lvar.rkt")
 (require "type-check-Lif.rkt")
+(require "type-check-Lfun.rkt")
 (require "type-check-Cvar.rkt")
 (require "type-check-Cif.rkt")
+(require "type-check-Cfun.rkt")
 (require "utilities.rkt")
 (require "interp.rkt")
 (require "multigraph.rkt")
@@ -29,9 +33,20 @@
     )
   )
 
+(define (shrink-def def)
+  (match def
+    [(Def name param-list rty info body) (Def name param-list rty info (shrink-exp body))]
+    )
+  )
+
 (define (shrink p)
   (match p
-    [(Program info e) (Program info (shrink-exp e))]
+    [(ProgramDefsExp info defs exp)
+     (ProgramDefs info
+                  (append
+                   (for/list ([def defs]) (shrink-def def))
+                   (list (Def 'main '() 'Integer '() (shrink-exp exp)))
+                   ))]
     )
   )
 
@@ -45,12 +60,42 @@
       [(Let x e body) (let ([n (gensym x)]) (Let n ((uniquify_exp env) e) ((uniquify_exp (dict-set env x n)) body)) )]
       [(Prim op es) (Prim op (for/list ([e es]) ((uniquify_exp env) e)))]
       [(If cond a b) (If ((uniquify_exp env) cond) ((uniquify_exp env) a) ((uniquify_exp env) b))]
+      [(Apply f exp) (Apply ((uniquify_exp env) f) (map (uniquify_exp env) exp))]
+      ))
+  )
+
+(define (extract-var var)
+  (match var
+    [(quasiquote [,x : ,_]) x]
+    )
+  )
+
+(define (extract-def-name def)
+  (match def
+    [(Def name _ _ _ _) name]
+    )
+  )
+
+(define (uniquify-def env)
+  (lambda (def)
+    (match def
+      [(Def name param-list rty info body)
+       (define new-env (append (for/list ([x param-list]) (let ([y (extract-var x)]) (cons y (gensym y)))) env))
+       (Def (dict-ref env name)
+            (for/list ([x param-list]) (match x [(quasiquote [,x : ,t])  `[,(dict-ref new-env x) :,t]]))
+            rty info
+            ((uniquify_exp
+              new-env
+              ) body))]
       ))
   )
 
 (define (uniquify p)
   (match p
-    [(Program '() e) (Program '() ((uniquify_exp '()) e))])
+    [(ProgramDefs info defs)
+     (define env (for/list [(d defs)] (define name (extract-def-name d)) (cons name (cond [(eq? name 'main) name] [else (gensym name)]))))
+     (ProgramDefs info (map (uniquify-def env) defs))
+     ])
   )
 
 ;; remove-complex-opera* : R1 -> R1
@@ -609,24 +654,24 @@
 (define (print-as p)
   (pretty-print p)
   p
-)
+  )
 
 ;; Define the compiler passes to be used by interp-tests and the grader
 ;; Note that your compiler file (the file that defines the passes)
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-    ("shrink", shrink, interp-Lif, type-check-Lif)
-    ("uniquify", uniquify, interp-Lif, type-check-Lif)
-    ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
-    ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
-    ("printer", print-as, interp-Cif, type-check-Cif)
-    ("instruction selection" ,select-instructions , interp-x86-1)
-    ("uncover live", uncover-live, interp-x86-1)
-    ("build interference", build-interference, interp-x86-1)
-    ("allocate registers", allocate-registers, interp-x86-1)
-    ("patch instructions" ,patch-instructions ,interp-pseudo-x86-1)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-pseudo-x86-1)
+    ("shrink", shrink, interp-Lfun, type-check-Lfun)
+    ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
+    ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
+    ; ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("printer", print-as, interp-Lfun, type-check-Lfun)
+    ; ("instruction selection" ,select-instructions , interp-x86-1)
+    ; ("uncover live", uncover-live, interp-x86-1)
+    ; ("build interference", build-interference, interp-x86-1)
+    ; ("allocate registers", allocate-registers, interp-x86-1)
+    ; ("patch instructions" ,patch-instructions ,interp-pseudo-x86-1)
+    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-pseudo-x86-1)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
