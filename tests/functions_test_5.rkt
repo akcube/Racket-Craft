@@ -3,4 +3,4 @@
       1
       0))
 
-(is-positive -10)
+(is-positive 0)

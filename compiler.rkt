@@ -136,6 +136,12 @@
 (define (is-atom? x)
   (or (Int? x) (Var? x) (Bool? x)))
 
+(define (rec-let args gen-names inner-fn)  
+    (if (null? args)
+          (let ([t (gensym 't)] ) (Let t inner-fn (Apply (Var t) gen-names)))
+            (let ([t (gensym 't)]) 
+              (Let t (car args) (rec-let (cdr args) (append gen-names (list (Var t))) inner-fn)))))
+
 (define (remove-complex-opera* p)
   (match p
     [(ProgramDefs info defs) (ProgramDefs info (map remove-complex-opera* defs))]
@@ -143,7 +149,7 @@
     [(Int n) (Int n)]
     [(Var x) (Var x)]
     [(Bool b) (Bool b)]
-    [(FunRef label kargs) (FunRef label kargs)]
+    [(FunRef label kargs) ((FunRef label kargs))]
     [(Let x e body) (Let x (remove-complex-opera* e) (remove-complex-opera* body))]
     [(If con tru els) (If (remove-complex-opera* con) (remove-complex-opera* tru) (remove-complex-opera* els))]
     [(Prim op es) #:when (< 1 (length es)) (foldl
@@ -163,7 +169,7 @@
                     [(list (? is-atom? a)) (Prim op es)]
                     [(list a) (let ([t (gensym 't)]) (Let t (remove-complex-opera* a) (Prim op (list (Var t)))))]
                     )]
-    [(Apply f es) (Apply f (map remove-complex-opera* es))]
+    [(Apply f exp) (rec-let exp '() f)]
     )
   )
 
@@ -177,6 +183,7 @@
     [(Prim op es) (Return (Prim op es))]
     [(If cnd thn els) (explicate-pred cnd (explicate-control-tail thn)
                                       (explicate-control-tail els))]
+    [(Apply f exp) (TailCall f exp)]
     [_ (error "explicate_tail unhandled case" e)]
     )
   )
@@ -190,6 +197,8 @@
     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
     [(If cnd thn els) (explicate-pred cnd (explicate-assign thn x cont)
                                       (explicate-assign els x cont))]
+    [(Apply f exp) (Seq (Assign (Var x) (Call f exp))  cont)]
+    [(FunRef label kargs) (Seq (Assign (Var x) (FunRef label kargs)) cont)]
     [_ (error "explicate_assign unhandled case" e)]
     )
   )
@@ -201,12 +210,15 @@
     [(Let x rhs body) (explicate-assign rhs x (explicate-pred body thn els))]
     [(Prim 'not (list e)) (IfStmt (Prim 'eq? (list e (Bool #f))) (create_block thn)
                                   (create_block els))]
-    [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<) (eq? op '>))
+    [(Prim op es) #:when (or (eq? op 'eq?) (eq? op '<) (eq? op '>) (eq? op '<=) (eq? op '>=))
                   (IfStmt (Prim op es) (create_block thn)
                           (create_block els))]
     [(Bool b) (if b thn els)]
     [(If cnd^ thn^ els^) (explicate-pred cnd^ (explicate-pred thn^ thn els)
                                          (explicate-pred els^ thn els))]
+    [(Apply f exp) (let ([pred (gensym 'pred)]) 
+      (Seq (Assign (Var pred) (Call f exp))
+                    (IfStmt (Prim 'eq? (list (Var pred) #t) (create_block thn) (create_block els)))))]
     [_ (error "explicate_pred unhandled case" cnd)]))
 
 (define basic-blocks '())
@@ -219,11 +231,18 @@
        (set! basic-blocks (cons (cons label tail) basic-blocks))
        (Goto label))]))
 
+(define (explicate-control-def defs)
+  (match defs
+    [(Def name param-list rty info body)
+     (set! basic-blocks '())
+     (let ([tail (explicate-control-tail body)])
+        (Def name param-list rty info (dict-set basic-blocks (symbol-append name 'start) tail)))]))
+
+
 (define (explicate-control p)
   (set! basic-blocks '())
   (match p
-    [(Program info body) (CProgram info (cons (cons 'start (explicate-control-tail body)) basic-blocks))]
-    ))
+    [(ProgramDefs info defs) (ProgramDefs info (map explicate-control-def defs))]))
 
 ;; select-instructions : C0 -> pseudo-x86
 (define (select-instructions-atm atm)
@@ -702,7 +721,7 @@
     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
-    ; ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
+    ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
     ; ("printer", print-as, interp-Lfun, type-check-Lfun)
     ; ("instruction selection" ,select-instructions , interp-x86-1)
     ; ("uncover live", uncover-live, interp-x86-1)
