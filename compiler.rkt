@@ -775,6 +775,6 @@
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
     ; ("instruction selection" ,select-instructions , interp-x86-0)
-    ("vis", igviz, interp-pseudo-x86-3)
+    ; ("vis", igviz, interp-pseudo-x86-3)
     ; ; ("assign homes" ,assign-homes ,interp-x86-0)
     ))
