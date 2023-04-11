@@ -1,7 +1,7 @@
 #lang racket
 (require racket/set racket/stream)
 (require racket/fixnum)
-(require "interp-Lint.rkt")
+; (require "interp-Lint.rkt")
 (require "interp-Lif.rkt")
 (require "interp-Lvar.rkt")
 (require "interp-Lfun.rkt")
@@ -96,6 +96,39 @@
      (define env (for/list [(d defs)] (define name (extract-def-name d)) (cons name (cond [(eq? name 'main) name] [else (gensym name)]))))
      (ProgramDefs info (map (uniquify-def env) defs))
      ])
+  )
+
+(define (reveal-functions-exp funcs)
+  (lambda (e)
+    (match e
+      [(Int n) (Int n)]
+      [(Bool b) (Bool b)]
+      [(Var v) (if (assq v funcs) (FunRef (car (assq v funcs)) (cdr (assq v funcs))) (Var v))]
+      [(Prim op es) (Prim op (map (reveal-functions-exp funcs) es))]
+      [(Let x e body) (Let x ((reveal-functions-exp funcs) e) ((reveal-functions-exp funcs) body))]
+      [(If cond a b) (If ((reveal-functions-exp funcs) cond) ((reveal-functions-exp funcs) a) ((reveal-functions-exp funcs) b))]
+      [(Apply f exp) (Apply ((reveal-functions-exp funcs) f) (map (reveal-functions-exp funcs) exp))]
+      )
+    )
+)
+
+(define (reveal-functions-def funcs)
+  (lambda (def)
+    (match def
+      [(Def name param-list rty info body)
+       (Def name param-list rty info ((reveal-functions-exp funcs) body))
+       ]
+      )
+    )
+  )
+
+(define (reveal-functions p)
+  (match p
+    [(ProgramDefs info defs)
+     (define funcs (for/list ([def defs]) (match def [(Def name param-list _ _ _) (cons name (length param-list))])))
+     (ProgramDefs info (map (reveal-functions-def funcs) defs))
+     ]
+    )
   )
 
 ;; remove-complex-opera* : R1 -> R1
@@ -663,9 +696,10 @@
   `(
     ("shrink", shrink, interp-Lfun, type-check-Lfun)
     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
+    ("reveal functions", reveal-functions, interp-Lfun, type-check-Lfun)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
     ; ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
-    ("printer", print-as, interp-Lfun, type-check-Lfun)
+    ; ("printer", print-as, interp-Lfun, type-check-Lfun)
     ; ("instruction selection" ,select-instructions , interp-x86-1)
     ; ("uncover live", uncover-live, interp-x86-1)
     ; ("build interference", build-interference, interp-x86-1)
