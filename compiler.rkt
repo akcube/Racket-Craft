@@ -434,11 +434,11 @@
 (define (read-set  instr)
   (match instr
     [(Instr 'leaq (list s d)) (set-atm s)]
-    [(IndirectCallq addr num-args) 
-      (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
+    [(IndirectCallq addr num-args)
+     (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
     [(Callq addr num-args) (set)] ; only read_int?
     [(TailJmp addr num-args)
-      (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
+     (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
     [(Jmp 'conclusion) (set 'rax 'rsp)]
     [(Jmp label) (set)]
     [(JmpIf cc label) (set)]
@@ -523,7 +523,7 @@
        (Block (dict-remove info 'live-after) instrs))]))
 
 (define (build-interference ast)
-  (match ast 
+  (match ast
     [(ProgramDefs info defs) (ProgramDefs info (map build-interference defs))]
     [(Def name param-list rty info blocks)
      (define G (undirected-graph '()))
@@ -637,12 +637,12 @@
 (define (allocate-registers ast)
   (match ast
     [(ProgramDefs info defs) (ProgramDefs info (map allocate-registers defs))]
-    [(Def name param-list rty info blocks) 
-      (define-values (color spills callee-save-used)
-      (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
-      (define uinfo (dict-set info 'used_callee callee-save-used))
-      (Def name param-list rty (dict-set uinfo 'stack-space (* spills 8))
-        (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block)))))]))
+    [(Def name param-list rty info blocks)
+     (define-values (color spills callee-save-used)
+       (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
+     (define uinfo (dict-set info 'used_callee callee-save-used))
+     (Def name param-list rty (dict-set uinfo 'stack-space (* spills 8))
+          (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block)))))]))
 
 ;; patch-instructions : psuedo-x86 -> x86
 (define (big-int? n)
@@ -688,10 +688,17 @@
     )
   )
 
+(define (patch-instrs-def d)
+  (match d
+    [(Def name param-list rty info blocks)
+     (Def name param-list rty info (for/list ([(label block) (in-dict blocks)]) (cons label (patch-instrs-block block))))]
+    )
+)
+
 (define (patch-instructions p)
   (match p
-    [(X86Program info blocks)
-     (X86Program info (for/list ([block blocks]) (cons (car block) (patch-instrs-block (cdr block)))))
+    [(ProgramDefs info defs)
+     (ProgramDefs info (for/list ([def defs]) (patch-instrs-def def)))
      ]
     )
   )
@@ -773,9 +780,9 @@
     ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
     ("uncover live", uncover-live, interp-pseudo-x86-3)
     ("build interference", build-interference, interp-pseudo-x86-3)
-    ("allocate registers", allocate-registers, interp-pseudo-x86-3)
-    ; ("patch instructions" ,patch-instructions ,interp-pseudo-x86-1)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-pseudo-x86-3)
+    ("allocate registers", allocate-registers, interp-x86-3)
+    ("patch instructions" ,patch-instructions ,interp-x86-3)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-3)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
