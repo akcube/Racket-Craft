@@ -257,7 +257,7 @@
   (match stmt
     [(Assign v exp) (match exp
                       [(? is-atom? exp) (list (Instr 'movq (list (select-instructions-atm exp) v)))]
-                      [(FunRef f n) (list (Instr 'leaq (list (FunRef f n ) (select-instructions-atm v))))]
+                      [(FunRef f n) (list (Instr 'leaq (list (Global f) v)))]
                       [(Call f ps) (append (for/list ([v ps] [reg arg-registers]) (Instr 'movq (list v (Reg reg))))
                                            (list (IndirectCallq f (length ps)) (Instr 'movq (list (Reg 'rax) v))))]
                       [(Prim 'read '()) (list (Callq 'read_int 0) (Instr 'movq (list (Reg 'rax) v)))]
@@ -331,7 +331,7 @@
   (define new-start (match start-block
                       [(Block info tail)
                        (Block info (append
-                                    (for/list ([v param-list] [reg arg-registers]) (Instr 'movq (list (Reg reg) (extract-var v))))
+                                    (for/list ([v param-list] [reg arg-registers]) (Instr 'movq (list (Reg reg) (Var (extract-var v)))))
                                     tail
                                     ))]))
   (dict-set blocks (symbol-append name 'start) new-start)
@@ -748,7 +748,7 @@
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
-    ("printer", print-as, interp-Cfun, type-check-Cfun)
+    ; ("printer", print-as, interp-Cfun, type-check-Cfun)
     ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
     ; ("uncover live", uncover-live, interp-x86-1)
     ; ("build interference", build-interference, interp-x86-1)
