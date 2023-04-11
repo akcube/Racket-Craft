@@ -134,14 +134,16 @@
 
 ;; remove-complex-opera* : R1 -> R1
 (define (is-atom? x)
-  (or (Int? x)  (Var? x) (Bool? x)))
+  (or (Int? x) (Var? x) (Bool? x)))
 
 (define (remove-complex-opera* p)
   (match p
-    [(Program '() e) (Program '() (remove-complex-opera* e))]
-    [(Int n)   (Int n)]
-    [(Var x)   (Var x)]
-    [(Bool b)  (Bool b)]
+    [(ProgramDefs info defs) (ProgramDefs info (map remove-complex-opera* defs))]
+    [(Def name param-list rty info body) (Def name param-list rty info (remove-complex-opera* body))]
+    [(Int n) (Int n)]
+    [(Var x) (Var x)]
+    [(Bool b) (Bool b)]
+    [(FunRef label kargs) (FunRef label kargs)]
     [(Let x e body) (Let x (remove-complex-opera* e) (remove-complex-opera* body))]
     [(If con tru els) (If (remove-complex-opera* con) (remove-complex-opera* tru) (remove-complex-opera* els))]
     [(Prim op es) #:when (< 1 (length es)) (foldl
@@ -161,6 +163,7 @@
                     [(list (? is-atom? a)) (Prim op es)]
                     [(list a) (let ([t (gensym 't)]) (Let t (remove-complex-opera* a) (Prim op (list (Var t)))))]
                     )]
+    [(Apply f es) (Apply f (map remove-complex-opera* es))]
     )
   )
 
@@ -698,7 +701,7 @@
     ("shrink", shrink, interp-Lfun, type-check-Lfun)
     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
-    ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lif ,type-check-Lif)
+    ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ; ("explicate control" ,explicate-control ,interp-Cif ,type-check-Cif)
     ; ("printer", print-as, interp-Lfun, type-check-Lfun)
     ; ("instruction selection" ,select-instructions , interp-x86-1)
