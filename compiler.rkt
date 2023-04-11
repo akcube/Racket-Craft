@@ -48,6 +48,7 @@
                    (for/list ([def defs]) (shrink-def def))
                    (list (Def 'main '() 'Integer '() (shrink-exp exp)))
                    ))]
+    [_ (error "shrink: not a ProgramDefsExp")]
     )
   )
 
@@ -700,37 +701,36 @@
   (if (equal? 0 (modulo n 16)) n (* 16 (+ (quotient n 16) 1)))
   )
 
-(define (gen-prelude info)
-  (append
-   (list
-    (Instr 'pushq (list (Reg 'rbp)))
-    (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp))))
-   ;; Push stuff here
-   (for/list ([var (set->list (dict-ref info 'used_callee))])
-     (Instr 'pushq (list (Reg (color->register var)))))
+(define (gen-prelude name info)
+  (Block '() (append
+              (list
+               (Instr 'pushq (list (Reg 'rbp)))
+               (Instr 'movq  (list (Reg 'rsp) (Reg 'rbp))))
+              ;; Push stuff here
+              (for/list ([var (set->list (dict-ref info 'used_callee))])
+                (Instr 'pushq (list (Reg (color->register var)))))
 
-   (list
-    (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
-                   (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
-                         (Reg 'rsp))))
-    (Jmp 'start)
-    ))
+              (list
+               (Instr 'subq (let [(C (* 8 (length (set->list (dict-ref info 'used_callee)))))]
+                              (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                                    (Reg 'rsp))))
+               (Jmp (symbol-append name 'start))
+               )))
   )
 
 (define (gen-conclusion info)
-  (append
-   (list
-    (Instr 'subq (let [(C (length (set->list (dict-ref info 'used_callee))))]
-                   (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
-                         (Reg 'rsp)))))
-   ;; Pop stuff here
-   (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
-     (Instr 'popq (list (Reg (color->register var)))))
-   (list
-    (Instr 'popq (list (Reg 'rbp)))
-    (Retq))
-   )
-  )
+  (Block '() (append
+              (list
+               (Instr 'addq (let [(C (* 8 (length (set->list (dict-ref info 'used_callee)))))]
+                              (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                                    (Reg 'rsp)))))
+              ;; Pop stuff here
+              (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
+                (Instr 'popq (list (Reg (color->register var)))))
+              (list
+               (Instr 'popq (list (Reg 'rbp)))
+               (Retq))
+              )))
 
 (define (main-block)
   (match (system-type 'os)
@@ -741,13 +741,18 @@
 
 (define (prelude-and-conclusion p)
   (match p
-    [(X86Program info blist)
-     (X86Program info (append
-                       blist
-                       (list (cons (main-block) (Block '() (gen-prelude info))))
-                       (list (cons 'conclusion (Block '() (gen-conclusion info))))
-                       ))]
-    ))
+    [(ProgramDefs info defs)
+     (ProgramDefs info
+                  (for/list ([def defs])
+                    (match def
+                      [(Def name param-list rty info blocks)
+                       (Def name param-list rty info
+                            (append blocks (list (cons name (gen-prelude name info)) (cons (symbol-append name 'conclusion) (gen-conclusion info)))))]
+                      [_ def]
+                      )
+                    )
+                  )]
+     ))
 
 (define (print-as p)
   (pretty-print p)
@@ -759,8 +764,8 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-    ("shrink", shrink, interp-Lfun-prime, type-check-Lfun)
-    ; ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
+    ("shrink", shrink, interp-Lfun, type-check-Lfun)
+    ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
@@ -770,7 +775,7 @@
     ("build interference", build-interference, interp-pseudo-x86-3)
     ("allocate registers", allocate-registers, interp-pseudo-x86-3)
     ; ("patch instructions" ,patch-instructions ,interp-pseudo-x86-1)
-    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-pseudo-x86-1)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-pseudo-x86-3)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
