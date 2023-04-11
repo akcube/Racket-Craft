@@ -759,7 +759,7 @@
 ;; must be named "compiler.rkt"
 (define compiler-passes
   `(
-    ("shrink", shrink, interp-Lfun, type-check-Lfun)
+    ("shrink", shrink, interp-Lfun-prime, type-check-Lfun)
     ; ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
