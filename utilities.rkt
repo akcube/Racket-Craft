@@ -1736,7 +1736,7 @@ Changelog:
         [(Imm n) (format "$~a" n)]
         [(Reg r) (format "%~a" r)]
         [(ByteReg r) (format "%~a" r)]
-        #;[(FunRef label n) (format "~a(%rip)" (label-name label))]
+        [(FunRef label n) (format "~a(%rip)" (label-name label))]
         [(Global label) (format "~a(%rip)" (label-name label))]
         ))
     

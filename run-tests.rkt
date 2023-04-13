@@ -3,8 +3,10 @@
 
 (require "utilities.rkt")
 (require "type-check-Lif.rkt")
-(require "interp-Lif.rkt")
-(require "interp-Lvar.rkt")
+(require "type-check-Lfun.rkt")
+; (require "interp-Lif.rkt")
+; (require "interp-Lvar.rkt")
+(require "interp-Lfun.rkt")
 (require "interp-Cvar.rkt")
 (require "interp.rkt")
 (require "compiler.rkt")
@@ -26,9 +28,9 @@
           (string=? r (car (string-split p "_"))))
         all-tests)))
 
-(interp-tests "cond" type-check-Lif compiler-passes interp-Lif "cond_test" (tests-for "cond"))
+(interp-tests "functions" type-check-Lfun compiler-passes interp-Lfun "functions_test" (tests-for "functions"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.
-(compiler-tests "cond" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
+; (compiler-tests "cond" type-check-Lif compiler-passes "cond_test" (tests-for "cond"))
 

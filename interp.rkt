@@ -1275,7 +1275,7 @@
             [(StackArg n)
              (define x (stack-arg-name n))
              (lookup x env)]
-            #;[(FunRef f n)
+            [(FunRef f n)
              (lookup f env)]
             [else ((super interp-x86-exp env) ast)]))
         (copious "R4/interp-x86-exp" (observe-value result))
