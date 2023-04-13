@@ -649,24 +649,38 @@
   (< 65536 n)
   )
 
-(define (patch-instrs instrs)
+(define (gen-jmp reg info)
+  (append
+   (list
+    (Instr 'addq (let [(C (* 8 (length (set->list (dict-ref info 'used_callee)))))]
+                   (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
+                         (Reg 'rsp)))))
+   ;; Pop stuff here
+   (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
+     (Instr 'popq (list (Reg (color->register var)))))
+   (list
+    (Instr 'popq (list (Reg 'rbp)))
+    (IndirectJmp reg))
+   ))
+
+(define (patch-instrs instrs info)
   (match instrs
     ['() '()]
     [(list ins rest ...)
      (match ins
-       [(Instr 'movq (list a a)) (patch-instrs rest)]
+       [(Instr 'movq (list a a)) (patch-instrs rest info)]
        [(Instr name (list (Deref reg1 off1) (Deref reg2 off2)))
         (append (list
                  (Instr 'movq (list (Deref reg1 off1) (Reg 'rax)))
                  (Instr name (list (Reg 'rax) (Deref reg2 off2)))
                  )
-                (patch-instrs rest))]
+                (patch-instrs rest info))]
        [(Instr name (list (Imm (? big-int? n)) (Deref reg off)))
         (append (list
                  (Instr 'movq (list (Imm n) (Reg 'rax)))
                  (Instr name (list (Reg 'rax) (Deref reg off)))
                  )
-                (patch-instrs rest)
+                (patch-instrs rest info)
                 )]
        ;; This is prolly not required but just in case
        [(Instr name (list (Deref reg off) (Imm (? big-int? n))))
@@ -674,26 +688,27 @@
                  (Instr 'movq (list (Deref reg off) (Reg 'rax) ))
                  (Instr name (list (Reg 'rax) (Imm n)))
                  )
-                (patch-instrs rest)
+                (patch-instrs rest info)
                 )]
-       [_ (cons ins (patch-instrs rest))]
+       [(TailJmp var ar) (append (gen-jmp var info) (patch-instrs rest info))]
+       [_ (cons ins (patch-instrs rest info))]
        )
      ]
     )
   )
 
-(define (patch-instrs-block b)
+(define (patch-instrs-block b finfo)
   (match b
-    [(Block info instrs) (Block info (patch-instrs instrs))]
+    [(Block info instrs) (Block info (patch-instrs instrs finfo))]
     )
   )
 
 (define (patch-instrs-def d)
   (match d
     [(Def name param-list rty info blocks)
-     (Def name param-list rty info (for/list ([(label block) (in-dict blocks)]) (cons label (patch-instrs-block block))))]
+     (Def name param-list rty info (for/list ([(label block) (in-dict blocks)]) (cons label (patch-instrs-block block info))))]
     )
-)
+  )
 
 (define (patch-instructions p)
   (match p
@@ -759,7 +774,20 @@
                       )
                     )
                   )]
-     ))
+    ))
+
+(define (to-x86-def def lst)
+  (match def
+    [(Def name param-list rty info blocks) (append blocks lst)]
+  )
+)
+
+(define (to-x86 p)
+  (match p
+    [(ProgramDefs info defs)
+     (X86Program info (foldr to-x86-def '() defs))
+     ]
+))
 
 (define (print-as p)
   (pretty-print p)
@@ -783,6 +811,7 @@
     ("allocate registers", allocate-registers, interp-x86-3)
     ("patch instructions" ,patch-instructions ,interp-x86-3)
     ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-3)
+    ("to-x86" ,to-x86 ,interp-x86-3)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
