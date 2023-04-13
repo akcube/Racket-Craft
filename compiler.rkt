@@ -654,13 +654,16 @@
    (list
     (Instr 'addq (let [(C (* 8 (length (set->list (dict-ref info 'used_callee)))))]
                    (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
-                         (Reg 'rsp)))))
+                         (Reg 'rsp))))
+    (Instr 'movq (list reg (Reg 'rax)))
+    )
    ;; Pop stuff here
    (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
      (Instr 'popq (list (Reg (color->register var)))))
    (list
     (Instr 'popq (list (Reg 'rbp)))
-    (IndirectJmp reg))
+    (IndirectJmp (Reg 'rax))
+    )
    ))
 
 (define (patch-instrs instrs info)
@@ -747,6 +750,7 @@
                               (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
                                     (Reg 'rsp)))))
               ;; Pop stuff here
+              
               (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
                 (Instr 'popq (list (Reg (color->register var)))))
               (list
