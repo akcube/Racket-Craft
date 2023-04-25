@@ -48,7 +48,7 @@
                    (for/list ([def defs]) (shrink-def def))
                    (list (Def 'main '() 'Integer '() (shrink-exp exp)))
                    ))]
-    [_ (error "shrink: not a ProgramDefsExp")]
+    [_ (error "shrink: not a ProgramDefsExp" p)]
     )
   )
 
@@ -135,26 +135,65 @@
     )
   )
 
-; (define (expose-allocation-exp funcs)
-;   (lambda (e)
-;     (match e
-;       []))
-;   )
+;; 3 parts
+;; Gen lets
+(define (gen-exp-lets vars es cont)
+  (if (null? vars) cont (Let (car vars) (car es) (gen-exp-lets (cdr vars) (cdr es) cont)))
+  )
 
-; (define (expose-allocation-def funcs)
-;   (lambda (def)
-;     (match def
-;       [(Def name param-list rty info body)
-;         (Def name param-list rty info ((expose-allocation-exp funcs) body))
-;       ])))
+;; Allocate space
+(define (gen-gc bytes cont)
+  (Let '_ (If (Prim '< (list (Prim '+ (list (GlobalValue 'free_ptr) (Int bytes)))
+                             (GlobalValue 'fromspace_end)))
+              (Void)
+              (Collect bytes))
+       cont)
+  )
 
-; (define (expose-allocation p)
-;   (match p
-;     [(ProgramDefs info defs)
-;      (define funcs (for/list ([def defs]) (match def [(Def name param-list _ _ _) (cons name (length param-list))])))
-;      (ProgramDefs info (map (reveal-functions-def funcs) defs))
-;      ]
-;   ))
+;; Gen assignments
+(define (gen-allocate vec vars type )
+
+  (define (gen-vec-assi vars index)
+    (if (null? vars) (Var vec) (Let '_ (Prim 'vector-set! (list (Var vec) (Int index) (Var (car vars))))
+                              (gen-vec-assi (cdr vars) (+ index 1))))
+    )
+
+  (Let vec (Allocate (length vars) type) (gen-vec-assi vars 0))
+  )
+
+
+(define (expose-allocation-exp e)
+    (match e
+      [(HasType (Prim 'vector es) type) 
+       (define nes (for/list ([e es]) (expose-allocation-exp e)))
+       (define bytes (* (length nes) 8))
+       (define vars (for/list ([i (in-range (length nes))]) (gensym 'x)))
+       (define vec (gensym 'v))
+       (gen-exp-lets vars nes (gen-gc bytes (gen-allocate vec vars type)))
+       ]
+      [(Int n) (Int n)]
+      [(Var v) (Var v)]
+      [(Bool b) (Bool b)]
+      [(FunRef f n) (FunRef f n)]
+      [(Let x e body) (Let x (expose-allocation-exp e) (expose-allocation-exp body))]
+      [(Prim op es) (Prim op (map expose-allocation-exp es))]
+      [(If cnd thn els) (If (expose-allocation-exp cnd) (expose-allocation-exp thn) (expose-allocation-exp els))]
+      [(Apply f es) (Apply f (map expose-allocation-exp es))]
+    ))
+
+(define (expose-allocation-def def)
+    (match def
+      [(Def name param-list rty info body)
+        (Def name param-list rty info (expose-allocation-exp  body))
+      ]))
+
+(define (expose-allocation p)
+  (match p
+    [(ProgramDefs info defs)
+     (define funcs (for/list ([def defs]) (match def [(Def name param-list _ _ _) (cons name (length param-list))])))
+     (ProgramDefs info (map expose-allocation-def defs))
+     ]
+  ))
 
 ;; remove-complex-opera* : R1 -> R1
 (define (is-atom? x)
@@ -798,9 +837,10 @@
     ("shrink", shrink, interp-Lfun, type-check-Lfun)
     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
+    ("printer", print-as, interp-Lfun-prime, type-check-Lfun)
+    ("expose allocation", expose-allocation, interp-Lfun-prime, type-check-Lfun)
     ; ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ; ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
-    ; ("printer", print-as, interp-Cfun, type-check-Cfun)
     ; ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
     ; ("uncover live", uncover-live, interp-pseudo-x86-3)
     ; ("build interference", build-interference, interp-pseudo-x86-3)
