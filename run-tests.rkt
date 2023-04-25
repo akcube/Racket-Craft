@@ -28,7 +28,7 @@
           (string=? r (car (string-split p "_"))))
         all-tests)))
 
-(interp-tests "functions" type-check-Lfun compiler-passes interp-Lfun "functions_test" (tests-for "functions"))
+(interp-tests "vectors" type-check-Lfun compiler-passes interp-Lfun "vectors_test" (tests-for "vectors"))
 
 ;; Uncomment the following when all the passes are complete to
 ;; test the final x86 code.

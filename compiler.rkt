@@ -59,6 +59,7 @@
       [(Var x) (Var (dict-ref env x))]
       [(Int n) (Int n)]
       [(Bool b) (Bool b)]
+      [(HasType e type) (HasType ((uniquify_exp env) e) type)]
       [(Let x e body) (let ([n (gensym x)]) (Let n ((uniquify_exp env) e) ((uniquify_exp (dict-set env x n)) body)) )]
       [(Prim op es) (Prim op (for/list ([e es]) ((uniquify_exp env) e)))]
       [(If cond a b) (If ((uniquify_exp env) cond) ((uniquify_exp env) a) ((uniquify_exp env) b))]
@@ -106,6 +107,7 @@
       [(Int n) (Int n)]
       [(Bool b) (Bool b)]
       [(Var v) (if (assq v funcs) (FunRef (car (assq v funcs)) (cdr (assq v funcs))) (Var v))]
+      [(HasType e type) (HasType ((reveal-functions-exp funcs) e) type)]
       [(Prim op es) (Prim op (map (reveal-functions-exp funcs) es))]
       [(Let x e body) (Let x ((reveal-functions-exp funcs) e) ((reveal-functions-exp funcs) body))]
       [(If cond a b) (If ((reveal-functions-exp funcs) cond) ((reveal-functions-exp funcs) a) ((reveal-functions-exp funcs) b))]
@@ -132,6 +134,27 @@
      ]
     )
   )
+
+; (define (expose-allocation-exp funcs)
+;   (lambda (e)
+;     (match e
+;       []))
+;   )
+
+; (define (expose-allocation-def funcs)
+;   (lambda (def)
+;     (match def
+;       [(Def name param-list rty info body)
+;         (Def name param-list rty info ((expose-allocation-exp funcs) body))
+;       ])))
+
+; (define (expose-allocation p)
+;   (match p
+;     [(ProgramDefs info defs)
+;      (define funcs (for/list ([def defs]) (match def [(Def name param-list _ _ _) (cons name (length param-list))])))
+;      (ProgramDefs info (map (reveal-functions-def funcs) defs))
+;      ]
+;   ))
 
 ;; remove-complex-opera* : R1 -> R1
 (define (is-atom? x)
@@ -358,37 +381,6 @@
   (match locals-types
     ['() (values env cnt)]
     [(list (cons var 'Integer) rest ...) (gen-locs rest (dict-set env var (+ cnt 8)) (+ cnt 8))]
-    )
-  )
-
-(define (assign-homes-var env)
-  (lambda (var)
-    (match var
-      [(Imm _) var]
-      [(Reg _) var]
-      [(Var v) (Deref 'rbp (- (dict-ref env v)))]
-      )
-    )
-  )
-
-(define (assign-homes-instr env)
-  (lambda (instr)
-    (match instr
-      [(Instr name arg*) (Instr name (for/list ([e arg*]) ((assign-homes-var env) e)))]
-      [_ instr]
-      ))
-  )
-
-(define (assign-homes p)
-  (match p
-    [(X86Program info (list (cons label (Block '() instrs))))
-     (let-values
-         ([(env cnt) (gen-locs (dict-ref info 'locals-types) '() 0)])
-       (X86Program (dict-set info 'stack-space cnt)
-                   (list (cons label
-                               (Block '()
-                                      (for/list ([ins instrs]) ((assign-homes-instr env) ins))
-                                      )))))]
     )
   )
 
@@ -806,16 +798,16 @@
     ("shrink", shrink, interp-Lfun, type-check-Lfun)
     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
-    ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
-    ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
+    ; ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
+    ; ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
     ; ("printer", print-as, interp-Cfun, type-check-Cfun)
-    ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
-    ("uncover live", uncover-live, interp-pseudo-x86-3)
-    ("build interference", build-interference, interp-pseudo-x86-3)
-    ("allocate registers", allocate-registers, interp-x86-3)
-    ("patch instructions" ,patch-instructions ,interp-x86-3)
-    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-3)
-    ("to-x86" ,to-x86 ,interp-x86-3)
+    ; ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
+    ; ("uncover live", uncover-live, interp-pseudo-x86-3)
+    ; ("build interference", build-interference, interp-pseudo-x86-3)
+    ; ("allocate registers", allocate-registers, interp-x86-3)
+    ; ("patch instructions" ,patch-instructions ,interp-x86-3)
+    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-3)
+    ; ("to-x86" ,to-x86 ,interp-x86-3)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
