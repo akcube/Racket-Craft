@@ -154,7 +154,7 @@
 (define (gen-allocate vec vars type )
 
   (define (gen-vec-assi vars index)
-    (if (null? vars) (HasType (Var vec) type) (Let '_ (Prim 'vector-set! (list (HasType (Var vec) type) (Int index) (Var (car vars))))
+    (if (null? vars) (Var vec) (Let '_ (Prim 'vector-set! (list (Var vec) (Int index) (Var (car vars))))
                               (gen-vec-assi (cdr vars) (+ index 1))))
     )
 
@@ -214,7 +214,6 @@
     [(Bool b) (Bool b)]
     [(Void) (Void)]
     [(FunRef label kargs) (FunRef label kargs)]
-    [(HasType v type) (HasType (remove-complex-opera* v) type)]
     [(Collect n) (Collect n)]
     [(Allocate n type) (Allocate n type)]
     [(GlobalValue x) (GlobalValue x)]
@@ -268,10 +267,15 @@
     [(Var y) (Seq (Assign (Var x) (Var y)) cont)]
     [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
     [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
+    [(Void) cont]
+    [(Collect n) (Seq (Collect n) cont)]
+    [(GlobalValue v) (Seq (Assign (Var x) (GlobalValue v)) cont)]
     [(Let y rhs body) (explicate-assign rhs y (explicate-assign body x cont))]
     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
     [(If cnd thn els) (explicate-pred cnd (explicate-assign thn x cont)
                                       (explicate-assign els x cont))]
+    [(Allocate n type) (Seq (Assign (Var x) (Allocate n type)) cont)]
+    [(HasType (Var vec) type) (Seq (Assign (Var x) (Var vec)) cont)]
     [(Apply f exp) (Seq (Assign (Var x) (Call f exp))  cont)]
     [(FunRef label kargs) (Seq (Assign (Var x) (FunRef label kargs)) cont)]
     [_ (error "explicate_assign unhandled case" e)]
@@ -852,7 +856,7 @@
     ; ("printer", print-as, interp-Lfun-prime, type-check-Lfun)
     ("expose allocation", expose-allocation, interp-Lfun-prime, type-check-Lfun)
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
-    ; ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
+    ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
     ; ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
     ; ("uncover live", uncover-live, interp-pseudo-x86-3)
     ; ("build interference", build-interference, interp-pseudo-x86-3)
