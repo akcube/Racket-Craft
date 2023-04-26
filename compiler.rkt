@@ -505,7 +505,7 @@
 (define (write-set instr)
   (match instr
     [(IndirectCallq addr num-args) (caller-save-for-alloc)]
-    [(Callq addr num-args) (set)] ; only read_int?
+    [(Callq addr num-args) (caller-save-for-alloc)] ; only read_int?
     [(TailJmp addr num-args) (caller-save-for-alloc)]
     [(Instr 'leaq (list r _)) (set-atm r)]
     [(Jmp label) (set)]
@@ -523,7 +523,8 @@
     [(Instr 'leaq (list s d)) (set-atm s)]
     [(IndirectCallq addr num-args)
      (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
-    [(Callq addr num-args) (set)] ; only read_int?
+    [(Callq addr num-args) 
+     (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))] ; only read_int?
     [(TailJmp addr num-args)
      (set-union (set-atm addr) (vector->set (vector-take arg-registers num-args)))]
     [(Jmp 'conclusion) (set 'rax 'rsp)]
@@ -589,12 +590,30 @@
      (Def name param-list rty info (uncover-live-blocks blist (make-cfg blist)))]))
 
 ;; build-interference :
+(define (is-tup? T)
+  (match T
+    [`(Vector ,ts ...) #t]
+    [_ #f]))
+
+(define (var-id var)
+  (match var
+    [(Var v) v]
+    [else (error "var-id: " var)]))
+
 (define (add-edges G s1 s2 nop)
   (for ([u s1])
     (for ([v s2])
       (cond [(and (not (member u nop)) (not (member u s2))) (add-edge! G u v)]))))
 
-(define (build-interference-aux S G)
+(define (tup-add-edges G s1 locals-types)
+  (for ([u s1])
+    (cond
+      [(and (not (set-member? all-registers u)) (is-tup? (dict-ref locals-types u)))
+          (add-edges G (list-atm u) (set->list callee-save) '())])))
+
+(define all-registers (set-union caller-save callee-save))
+
+(define (build-interference-aux S G locals-types)
   (match S
     [(Block info instrs)
      (let ([live-after (dict-ref info 'live-after)])
@@ -602,7 +621,8 @@
          (match I
            [(Instr 'movq (list s d)) (add-edges G L (list-atm d) (list-atm s))]
            [(Instr 'movzbq (list s d)) (add-edges G L (list-atm d) (list-atm s))]
-           [(Callq addr num-args) (add-edges G L (set->list caller-save-for-alloc) '())]
+           [(Callq addr num-args) (add-edges G L (set->list (caller-save-for-alloc)) '()) (tup-add-edges G L locals-types)]
+           [(IndirectCallq addr num-args) (add-edges G L (set->list (caller-save-for-alloc)) '()) (tup-add-edges G L locals-types)]
            [(Instr 'set _) '()]
            [_ (add-edges G L (set->list (write-set I)) '())]
            )
@@ -616,7 +636,7 @@
      (define G (undirected-graph '()))
      (for ([var (dict-ref info 'locals-types)])(add-vertex! G (car var)))
      (for ([reg (set->list registers)]) (add-vertex! G reg))
-     (define ublocks (for/list ([(label block) (in-dict blocks)]) (cons label (build-interference-aux block G))))
+     (define ublocks (for/list ([(label block) (in-dict blocks)]) (cons label (build-interference-aux block G (dict-ref info 'locals-types)))))
      (define uinfo (dict-set info 'conflicts G))
      (Def name param-list rty uinfo ublocks)]))
 
@@ -681,8 +701,19 @@
              (cond [(is-callee-reg c) (set-add! callee-save-used c)])
              )))
 
+  (define stack-spills 0)
+  (define root-stack-spills 0)
+  (define offset (make-hash))
   ; Return
-  (values color (max 0 (- max-alloc 10)) callee-save-used))
+  (for ([var lvars]) (cond
+    [(is-tup? (car var)) 
+      (cond [(> root-stack-spills 10) (hash-set! offset (car var) root-stack-spills)])
+      (set! root-stack-spills (+ root-stack-spills 1))]
+    [(and (is-var? var) (not (is-tup? var))) 
+      (cond [(> stack-spills 10) (hash-set! offset (car var) stack-spills)])
+      (set! stack-spills (+ stack-spills 1))]
+  ))
+  (values color stack-spills root-stack-spills offset callee-save-used))
 
 (define (allocate-registers-atm env)
   (lambda (var)
@@ -717,7 +748,6 @@
     (match block
       [(Block info instrs) (Block info (for/list ([instr instrs]) ((allocate-registers-instr env) instr)))]
       )
-
     )
   )
 
@@ -725,10 +755,11 @@
   (match ast
     [(ProgramDefs info defs) (ProgramDefs info (map allocate-registers defs))]
     [(Def name param-list rty info blocks)
-     (define-values (color spills callee-save-used)
+     (define-values (color stack-spills root-stack-spills offset callee-save-used)
        (dsatur-graph-coloring (dict-ref info 'conflicts) (dict-ref info 'locals-types)))
      (define uinfo (dict-set info 'used_callee callee-save-used))
-     (Def name param-list rty (dict-set uinfo 'stack-space (* spills 8))
+     
+     (Def name param-list rty (dict-set (dict-set (dict-set uinfo 'offset offset) 'root-stack-space (* root-stack-spills 8)) 'stack-space (* stack-spills 8))
           (for/list ([block blocks]) (cons (car block) ((allocate-registers-block color) (cdr block)))))]))
 
 ;; patch-instructions : psuedo-x86 -> x86
@@ -742,6 +773,8 @@
     (Instr 'addq (let [(C (* 8 (length (set->list (dict-ref info 'used_callee)))))]
                    (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
                          (Reg 'rsp))))
+    (Instr 'subq (list (Imm (round-16 (dict-ref info 'root-stack-space)))
+                                    (Reg 'r15)))
     (Instr 'movq (list reg (Reg 'rax)))
     )
    ;; Pop stuff here
@@ -826,6 +859,8 @@
                (Instr 'subq (let [(C (* 8 (length (set->list (dict-ref info 'used_callee)))))]
                               (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
                                     (Reg 'rsp))))
+               (Instr 'addq (list (Imm (round-16 (dict-ref info 'root-stack-space)))
+                                    (Reg 'r15)))
                (Jmp (symbol-append name 'start))
                )))
   )
@@ -835,7 +870,9 @@
               (list
                (Instr 'addq (let [(C (* 8 (length (set->list (dict-ref info 'used_callee)))))]
                               (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
-                                    (Reg 'rsp)))))
+                                    (Reg 'rsp))))
+               (Instr 'subq (list (Imm (round-16 (dict-ref info 'root-stack-space)))
+                                    (Reg 'r15))))
               ;; Pop stuff here
 
               (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
@@ -898,12 +935,12 @@
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
     ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
-    ; ("uncover live", uncover-live, interp-pseudo-x86-3)
-    ; ("build interference", build-interference, interp-pseudo-x86-3)
-    ; ("allocate registers", allocate-registers, interp-x86-3)
-    ; ("patch instructions" ,patch-instructions ,interp-x86-3)
-    ; ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-3)
-    ; ("to-x86" ,to-x86 ,interp-x86-3)
+    ("uncover live", uncover-live, interp-pseudo-x86-3)
+    ("build interference", build-interference, interp-pseudo-x86-3)
+    ("allocate registers", allocate-registers, interp-x86-3)
+    ("patch instructions" ,patch-instructions ,interp-x86-3)
+    ("prelude-and-conclusion" ,prelude-and-conclusion ,interp-x86-3)
+    ("to-x86" ,to-x86 ,interp-x86-3)
     ; ("uniquify" ,uniquify ,interp-Lvar ,type-check-Lvar)
     ; ("remove complex opera*" ,remove-complex-opera* ,interp-Lvar ,type-check-Lvar)
     ; ("explicate control" ,explicate-control ,interp-Cvar ,type-check-Cvar)
