@@ -155,7 +155,7 @@
 
   (define (gen-vec-assi vars index)
     (if (null? vars) (Var vec) (Let '_ (Prim 'vector-set! (list (Var vec) (Int index) (Var (car vars))))
-                              (gen-vec-assi (cdr vars) (+ index 1))))
+                                    (gen-vec-assi (cdr vars) (+ index 1))))
     )
 
   (Let vec (Allocate (length vars) type) (gen-vec-assi vars 0))
@@ -163,29 +163,29 @@
 
 
 (define (expose-allocation-exp e)
-    (match e
-      [(HasType (Prim 'vector es) type) 
-       (define nes (for/list ([e es]) (expose-allocation-exp e)))
-       (define bytes (* (length nes) 8))
-       (define vars (for/list ([i (in-range (length nes))]) (gensym 'x)))
-       (define vec (gensym 'v))
-       (gen-exp-lets vars nes (gen-gc bytes (gen-allocate vec vars type)))
-       ]
-      [(Int n) (Int n)]
-      [(Var v) (Var v)]
-      [(Bool b) (Bool b)]
-      [(FunRef f n) (FunRef f n)]
-      [(Let x e body) (Let x (expose-allocation-exp e) (expose-allocation-exp body))]
-      [(Prim op es) (Prim op (map expose-allocation-exp es))]
-      [(If cnd thn els) (If (expose-allocation-exp cnd) (expose-allocation-exp thn) (expose-allocation-exp els))]
-      [(Apply f es) (Apply f (map expose-allocation-exp es))]
+  (match e
+    [(HasType (Prim 'vector es) type)
+     (define nes (for/list ([e es]) (expose-allocation-exp e)))
+     (define bytes (* (length nes) 8))
+     (define vars (for/list ([i (in-range (length nes))]) (gensym 'x)))
+     (define vec (gensym 'v))
+     (gen-exp-lets vars nes (gen-gc bytes (gen-allocate vec vars type)))
+     ]
+    [(Int n) (Int n)]
+    [(Var v) (Var v)]
+    [(Bool b) (Bool b)]
+    [(FunRef f n) (FunRef f n)]
+    [(Let x e body) (Let x (expose-allocation-exp e) (expose-allocation-exp body))]
+    [(Prim op es) (Prim op (map expose-allocation-exp es))]
+    [(If cnd thn els) (If (expose-allocation-exp cnd) (expose-allocation-exp thn) (expose-allocation-exp els))]
+    [(Apply f es) (Apply f (map expose-allocation-exp es))]
     ))
 
 (define (expose-allocation-def def)
-    (match def
-      [(Def name param-list rty info body)
-        (Def name param-list rty info (expose-allocation-exp  body))
-      ]))
+  (match def
+    [(Def name param-list rty info body)
+     (Def name param-list rty info (expose-allocation-exp  body))
+     ]))
 
 (define (expose-allocation p)
   (match p
@@ -193,7 +193,7 @@
      (define funcs (for/list ([def defs]) (match def [(Def name param-list _ _ _) (cons name (length param-list))])))
      (ProgramDefs info (map expose-allocation-def defs))
      ]
-  ))
+    ))
 
 ;; remove-complex-opera* : R1 -> R1
 (define (is-atom? x)
@@ -220,12 +220,12 @@
     [(Let x e body) (Let x (remove-complex-opera* e) (remove-complex-opera* body))]
     [(If con tru els) (If (remove-complex-opera* con) (remove-complex-opera* tru) (remove-complex-opera* els))]
     [(Prim 'vector-set! (list vec-exp i set-exp)) (match* (vec-exp set-exp)
-                                                            [((? atm? vec-atm) (? atm? set-atm)) (Prim 'vector-set! (list vec-atm i set-atm))]
-                                                            [((? atm? vec-atm) set-atm) (let ([t (gensym 't)]) (Let t (remove-complex-opera* set-atm) (Prim 'vector-set! (list vec-atm i (Var t)))))]
-                                                            [(vec-atm (? atm? set-atm)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* vec-atm) (Prim 'vector-set! (list (Var t) i set-atm))))]
-                                                            [(vec-atm set-atm) (let ([t1 (gensym 't)] [t2 (gensym 't)])
-                                                                                   (Let t1 (remove-complex-opera* vec-atm) (Let t2 (remove-complex-opera* set-atm) (Prim 'vector-set! (list (Var t1) i (Var t2))))))]
-                                                                   )]
+                                                    [((? atm? vec-atm) (? atm? set-atm)) (Prim 'vector-set! (list vec-atm i set-atm))]
+                                                    [((? atm? vec-atm) set-atm) (let ([t (gensym 't)]) (Let t (remove-complex-opera* set-atm) (Prim 'vector-set! (list vec-atm i (Var t)))))]
+                                                    [(vec-atm (? atm? set-atm)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* vec-atm) (Prim 'vector-set! (list (Var t) i set-atm))))]
+                                                    [(vec-atm set-atm) (let ([t1 (gensym 't)] [t2 (gensym 't)])
+                                                                         (Let t1 (remove-complex-opera* vec-atm) (Let t2 (remove-complex-opera* set-atm) (Prim 'vector-set! (list (Var t1) i (Var t2))))))]
+                                                    )]
     [(Prim op es) #:when (< 1 (length es)) (foldl
                                             (lambda (x y)
                                               (match* (x y)
@@ -267,13 +267,15 @@
     [(Var y) (Seq (Assign (Var x) (Var y)) cont)]
     [(Int n) (Seq (Assign (Var x) (Int n)) cont)]
     [(Bool b) (Seq (Assign (Var x) (Bool b)) cont)]
-    [(Void) cont]
+    [(Void) (Seq (Assign (Var x) (Void)) cont)]
     [(Collect n) (Seq (Collect n) cont)]
     [(GlobalValue v) (Seq (Assign (Var x) (GlobalValue v)) cont)]
     [(Let y rhs body) (explicate-assign rhs y (explicate-assign body x cont))]
     [(Prim op es) (Seq (Assign (Var x) (Prim op es)) cont)]
-    [(If cnd thn els) (explicate-pred cnd (explicate-assign thn x cont)
-                                      (explicate-assign els x cont))]
+    [(If cnd thn els)
+     (define ncont (create_block cont))
+     (explicate-pred cnd (explicate-assign thn x ncont)
+                                      (explicate-assign els x ncont))]
     [(Allocate n type) (Seq (Assign (Var x) (Allocate n type)) cont)]
     [(HasType (Var vec) type) (Seq (Assign (Var x) (Var vec)) cont)]
     [(Apply f exp) (Seq (Assign (Var x) (Call f exp))  cont)]
@@ -329,13 +331,34 @@
     [(Var _) atm]
     [(Int i) (Imm i)]
     [(Bool b) (Imm (if b 1 0))]
+    [(Void) (Imm 0)]
+    [(GlobalValue v) (Global v)]
     )
   )
+
+(define (Vector? v)
+  (match v [`(Vector ,etps ...) #t][_ #f])
+  )
+
+(define (gen-tag type)
+  (define (calc-mask types)
+  (let ((mask 0) (bit 1))
+    (for ([t types])
+      (let ((tag (if (Vector? t) 1 0)))
+        (set! mask (bitwise-ior mask (* tag bit)))
+        (set! bit (arithmetic-shift bit 1))))
+    mask))
+
+  (define etps (match type [`(Vector ,etps ...) etps]))
+
+  (bitwise-ior 1 (bitwise-ior (arithmetic-shift (calc-mask etps) 7) (arithmetic-shift (length etps) 1)))
+)
 
 (define (select-instructions-stmt stmt)
   (match stmt
     [(Assign v exp) (match exp
-                      [(? is-atom? exp) (list (Instr 'movq (list (select-instructions-atm exp) v)))]
+                      [(? atm? exp) (list (Instr 'movq (list (select-instructions-atm exp) v)))]
+                      [(GlobalValue g) (list (Instr 'leaq (list (Global g) v)))]
                       [(FunRef f n) (list (Instr 'leaq (list (Global f) v)))]
                       [(Call f ps) (append (for/list ([v ps] [reg arg-registers]) (Instr 'movq (list v (Reg reg))))
                                            (list (IndirectCallq f (length ps)) (Instr 'movq (list (Reg 'rax) v))))]
@@ -386,7 +409,24 @@
                                                 (Instr 'set (list 'ge (ByteReg 'al)))
                                                 (Instr 'movzbq (list (ByteReg 'al) v))
                                                 )]
+                      [(Prim 'vector-ref (list tup (Int n))) (list (Instr 'movq (list (select-instructions-atm tup) (Reg 'r11)))
+                                                             (Instr 'movq (list (Deref 'r11 (* 8 (add1 n))) v)))]
+                      [(Prim 'vector-set! (list tup (Int n) rhs)) (list (Instr 'movq (list (select-instructions-atm tup) (Reg 'r11)))
+                                                                  (Instr 'movq (list (select-instructions-atm rhs) (Deref 'r11 (* 8 (add1 n)))))
+                                                                  (Instr 'movq (list (Imm 0) v)))]
+                      [(Prim 'vector-length (list tup)) (list (Instr 'movq (list (select-instructions-atm tup) (Reg 'r11)))
+                                                        (Instr 'movq (list (Deref 'r11 0) (Reg 'rax)))
+                                                        (Instr 'sarq (list (Imm 1) (Reg 'rax)))
+                                                        (Instr 'andq (list (Imm 63) (Reg 'rax)))
+                                                        (Instr 'movq (list (Reg 'rax) v)))]
+                      [(Allocate len type) (list (Instr 'movq (list (Global 'free_ptr) (Reg 'r11)))
+                                                 (Instr 'addq (list (Imm (* 8 (add1 len))) (Global 'free_ptr)))
+                                                 (Instr 'movq (list (Imm (gen-tag type)) (Deref 'r11 0)))
+                                                 (Instr 'movq (list (Reg 'r11) v)))]
                       )]
+    [(Collect bytes) (list (Instr 'movq (list (Reg 'r15) (Reg 'rdi)))
+                           (Instr 'movq (list (Imm bytes) (Reg 'rsi)))
+                           (Callq 'collect 2))]
     )
   )
 
@@ -797,7 +837,7 @@
                               (list (Imm (- (round-16 (+ (dict-ref info 'stack-space) C)) C))
                                     (Reg 'rsp)))))
               ;; Pop stuff here
-              
+
               (for/list ([var (reverse (set->list (dict-ref info 'used_callee)))])
                 (Instr 'popq (list (Reg (color->register var)))))
               (list
@@ -830,15 +870,15 @@
 (define (to-x86-def def lst)
   (match def
     [(Def name param-list rty info blocks) (append blocks lst)]
+    )
   )
-)
 
 (define (to-x86 p)
   (match p
     [(ProgramDefs info defs)
      (X86Program info (foldr to-x86-def '() defs))
      ]
-))
+    ))
 
 (define (print-as p)
   (pretty-print p)
@@ -857,7 +897,7 @@
     ("expose allocation", expose-allocation, interp-Lfun-prime, type-check-Lfun)
     ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
-    ; ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
+    ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
     ; ("uncover live", uncover-live, interp-pseudo-x86-3)
     ; ("build interference", build-interference, interp-pseudo-x86-3)
     ; ("allocate registers", allocate-registers, interp-x86-3)

@@ -1,4 +1,4 @@
- (define (id [x : Integer]) : Integer x)
+(define (id [x : Integer]) : Integer x)
 
-(let ([v (vector 1 2)])
-  42)
+(let ([v (vector (vector 1))])
+  (vector-length v))
