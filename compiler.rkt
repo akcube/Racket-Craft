@@ -154,7 +154,7 @@
 (define (gen-allocate vec vars type )
 
   (define (gen-vec-assi vars index)
-    (if (null? vars) (Var vec) (Let '_ (Prim 'vector-set! (list (Var vec) (Int index) (Var (car vars))))
+    (if (null? vars) (HasType (Var vec) type) (Let '_ (Prim 'vector-set! (list (HasType (Var vec) type) (Int index) (Var (car vars))))
                               (gen-vec-assi (cdr vars) (+ index 1))))
     )
 
@@ -212,15 +212,27 @@
     [(Int n) (Int n)]
     [(Var x) (Var x)]
     [(Bool b) (Bool b)]
+    [(Void) (Void)]
     [(FunRef label kargs) (FunRef label kargs)]
+    [(HasType v type) (HasType (remove-complex-opera* v) type)]
+    [(Collect n) (Collect n)]
+    [(Allocate n type) (Allocate n type)]
+    [(GlobalValue x) (GlobalValue x)]
     [(Let x e body) (Let x (remove-complex-opera* e) (remove-complex-opera* body))]
     [(If con tru els) (If (remove-complex-opera* con) (remove-complex-opera* tru) (remove-complex-opera* els))]
+    [(Prim 'vector-set! (list vec-exp i set-exp)) (match* (vec-exp set-exp)
+                                                            [((? atm? vec-atm) (? atm? set-atm)) (Prim 'vector-set! (list vec-atm i set-atm))]
+                                                            [((? atm? vec-atm) set-atm) (let ([t (gensym 't)]) (Let t (remove-complex-opera* set-atm) (Prim 'vector-set! (list vec-atm i (Var t)))))]
+                                                            [(vec-atm (? atm? set-atm)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* vec-atm) (Prim 'vector-set! (list (Var t) i set-atm))))]
+                                                            [(vec-atm set-atm) (let ([t1 (gensym 't)] [t2 (gensym 't)])
+                                                                                   (Let t1 (remove-complex-opera* vec-atm) (Let t2 (remove-complex-opera* set-atm) (Prim 'vector-set! (list (Var t1) i (Var t2))))))]
+                                                                   )]
     [(Prim op es) #:when (< 1 (length es)) (foldl
                                             (lambda (x y)
                                               (match* (x y)
-                                                [((? is-atom? rx) (? is-atom? ry)) (Prim op (list ry rx))]
-                                                [((? is-atom? rx) ry) (let ([t (gensym 't)]) (Let t (remove-complex-opera* ry) (Prim op (list (Var t) rx))))]
-                                                [(rx (? is-atom? ry)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* rx) (Prim op (list ry (Var t)))))]
+                                                [((? atm? rx) (? atm? ry)) (Prim op (list ry rx))]
+                                                [((? atm? rx) ry) (let ([t (gensym 't)]) (Let t (remove-complex-opera* ry) (Prim op (list (Var t) rx))))]
+                                                [(rx (? atm? ry)) (let ([t (gensym 't)]) (Let t (remove-complex-opera* rx) (Prim op (list ry (Var t)))))]
                                                 [(rx ry) (let ([t1 (gensym 't)] [t2 (gensym 't)])
                                                            (Let t1 (remove-complex-opera* ry) (Let t2 (remove-complex-opera* rx) (Prim op (list (Var t1) (Var t2))))))]
                                                 )
@@ -837,9 +849,9 @@
     ("shrink", shrink, interp-Lfun, type-check-Lfun)
     ("uniquify", uniquify, interp-Lfun, type-check-Lfun)
     ("reveal functions", reveal-functions, interp-Lfun-prime, type-check-Lfun)
-    ("printer", print-as, interp-Lfun-prime, type-check-Lfun)
+    ; ("printer", print-as, interp-Lfun-prime, type-check-Lfun)
     ("expose allocation", expose-allocation, interp-Lfun-prime, type-check-Lfun)
-    ; ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
+    ("remove complex opera*", remove-complex-opera*, interp-Lfun-prime, type-check-Lfun)
     ; ("explicate control", explicate-control, interp-Cfun, type-check-Cfun)
     ; ("instruction selection" ,select-instructions, interp-pseudo-x86-3)
     ; ("uncover live", uncover-live, interp-pseudo-x86-3)
